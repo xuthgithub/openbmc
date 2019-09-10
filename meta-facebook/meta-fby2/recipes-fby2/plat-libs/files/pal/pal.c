@@ -2,7 +2,7 @@
  *
  * Copyright 2015-present Facebook. All Rights Reserved.
  *
- * This file contains code to support IPMI2.0 Specificaton available @
+ * This file contains code to support IPMI2.0 Specification available @
  * http://www.intel.com/content/www/us/en/servers/ipmi/ipmi-specifications.html
  *
  * This program is free software; you can redistribute it and/or modify
@@ -46,12 +46,12 @@
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <openbmc/ncsi.h>
+#include <sys/sysinfo.h>
 
 
 #define BIT(value, index) ((value >> index) & 1)
 
 #define FBY2_PLATFORM_NAME "FBY2"
-#define LAST_KEY "last_key"
 #define FBY2_MAX_NUM_SLOTS 4
 #define GPIO_VAL "/sys/class/gpio/gpio%d/value"
 #define GPIO_DIR "/sys/class/gpio/gpio%d/direction"
@@ -136,12 +136,69 @@
 #define NON_DEBUG_MODE 0xff
 
 #if defined CONFIG_FBY2_ND
-#define CPER_CRASHDUMP_FILE "/mnt/data/cper_crashdump_slot"
-#define CPER_HEADER_SIZE 13
-#define CPER_TOTAL_PAGE_INDEX 11
-#define CPER_CURRENT_PAGE_INDEX 12
-#define CPER_COMMAND_TIME_RANGE 60
-#endif
+/* MCA bank data format */
+enum {
+  MAC_BANK_TYPE_UNKNOWN = 0,
+  MCA_BANK_TYPE_NORMAL = 1,
+  MCA_BANK_TYPE_VIRTUAL = 2,
+};
+
+typedef struct {
+  uint8_t bank_id;
+  uint8_t core_id;
+} valid_bank_id;
+
+typedef struct {
+  uint8_t bank_type;
+  uint8_t bank_fmt_ver;
+  union { /* bank data */
+    struct { /* normal mca_bank */
+      uint8_t bank_id;
+      uint8_t core_id;
+      uint32_t mca_ctrl_lf;
+      uint32_t mca_ctrl_hf;
+      uint32_t mca_status_lf;
+      uint32_t mca_status_hf;
+      uint32_t mca_addr_lf;
+      uint32_t mca_addr_hf;
+      uint32_t mca_misc0_lf;
+      uint32_t mca_misc0_hf;
+      uint32_t mca_ctrl_mask_lf;
+      uint32_t mca_ctrl_mask_hf;
+      uint32_t mca_config_lf;
+      uint32_t mca_config_hf;
+      uint32_t mca_ipid_lf;
+      uint32_t mca_ipid_hf;
+      uint32_t mca_synd_lf;
+      uint32_t mca_synd_hf;
+      uint32_t mca_destat_lf;
+      uint32_t mca_destat_hf;
+      uint32_t mca_deaddr_lf;
+      uint32_t mca_deaddr_hf;
+      uint32_t mca_misc1_lf;
+      uint32_t mca_misc1_hf;
+    } __attribute__((packed));
+    struct { /* virtual bank */
+      uint16_t bank_reserved;
+      uint32_t bank_s5_reset_status;
+      uint32_t bank_breakevent;
+      uint16_t valid_bank_num;
+      valid_bank_id valid_bank_list[1];
+    } __attribute__((packed));
+  };
+} __attribute__((packed)) mca_bank;
+
+#define CRASHDUMP_ND_BIN       "/usr/local/bin/crashdump_nd.sh"
+#define MAX_CRASHDUMP_CMD_SIZE 1024
+#define MAX_CRASHDUMP_FILE_NAME_LENGTH 128
+#define MAX_VAILD_LIST_LENGTH 128
+#define MCA_CMD_HEADER_LENGTH 4
+#define MCA_DECODED_LOG_PATH "/tmp/crashdump_slot%d_mca"
+#define CRASHDUMP_PID_PATH "/var/run/autodump%d.pid"
+#define CRASHDUMP_TIMESTAMP_FILE "fru%d_crashdump"
+
+#endif /* CONFIG_FBY2_ND */
+
 #define TIME_SYNC_KEY "time_sync"
 #define SYNC_DATE_SCRIPT "/usr/local/bin/sync_date.sh"
 
@@ -246,59 +303,109 @@ enum key_event {
   KEY_AFTER_INI,
 };
 
+typedef enum {
+  SLOT1_LAST_PWR_STATE=0,
+  SLOT2_LAST_PWR_STATE,
+  SLOT3_LAST_PWR_STATE,
+  SLOT4_LAST_PWR_STATE,
+  SLOT1_SYSFW_VER,
+  SLOT2_SYSFW_VER,
+  SLOT3_SYSFW_VER,
+  SLOT4_SYSFW_VER,
+  SLED_IDENTITY,
+  SLOT1_IDENTITY,
+  SLOT2_IDENTITY,
+  SLOT3_IDENTITY,
+  SLOT4_IDENTITY,
+  SLED_TIMESTAMP,
+  SLOT1_POR_CFG,
+  SLOT2_POR_CFG,
+  SLOT3_POR_CFG,
+  SLOT4_POR_CFG,
+  SLOT1_SENSOR_HEALTH,
+  SLOT2_SENSOR_HEALTH,
+  SLOT3_SENSOR_HEALTH,
+  SLOT4_SENSOR_HEALTH,
+  SPB_SENSOR_HEALTH,
+  NIC_SENSOR_HEALTH,
+  SLOT1_SEL_ERROR,
+  SLOT2_SEL_ERROR,
+  SLOT3_SEL_ERROR,
+  SLOT4_SEL_ERROR,
+  SLOT1_BOOT_ORDER,
+  SLOT2_BOOT_ORDER,
+  SLOT3_BOOT_ORDER,
+  SLOT4_BOOT_ORDER,
+  SLOT1_CPU_PPIN,
+  SLOT2_CPU_PPIN,
+  SLOT3_CPU_PPIN,
+  SLOT4_CPU_PPIN,
+  SLOT1_RESTART_CAUSE,
+  SLOT2_RESTART_CAUSE,
+  SLOT3_RESTART_CAUSE,
+  SLOT4_RESTART_CAUSE,
+  SLOT1_TRIGGER_HPR,
+  SLOT2_TRIGGER_HPR,
+  SLOT3_TRIGGER_HPR,
+  SLOT4_TRIGGER_HPR,
+  NTP_SERVER,
+  LAST_ID=255
+} key_cfg_id;
+
 struct pal_key_cfg {
+  key_cfg_id id;
   char *name;
   char *def_val;
   int (*function)(int, void*);
 } key_cfg[] = {
-  /* name, default value, function */
-  {"pwr_server1_last_state", "on", key_func_pwr_last_state},
-  {"pwr_server2_last_state", "on", key_func_pwr_last_state},
-  {"pwr_server3_last_state", "on", key_func_pwr_last_state},
-  {"pwr_server4_last_state", "on", key_func_pwr_last_state},
-  {"sysfw_ver_slot1", "0", NULL},
-  {"sysfw_ver_slot2", "0", NULL},
-  {"sysfw_ver_slot3", "0", NULL},
-  {"sysfw_ver_slot4", "0", NULL},
-  {"identify_sled", "off", key_func_iden_sled},
-  {"identify_slot1", "off", key_func_iden_slot},
-  {"identify_slot2", "off", key_func_iden_slot},
-  {"identify_slot3", "off", key_func_iden_slot},
-  {"identify_slot4", "off", key_func_iden_slot},
-  {"timestamp_sled", "0", NULL},
-  {"slot1_por_cfg", "lps", key_func_por_cfg},
-  {"slot2_por_cfg", "lps", key_func_por_cfg},
-  {"slot3_por_cfg", "lps", key_func_por_cfg},
-  {"slot4_por_cfg", "lps", key_func_por_cfg},
-  {"slot1_sensor_health", "1", NULL},
-  {"slot2_sensor_health", "1", NULL},
-  {"slot3_sensor_health", "1", NULL},
-  {"slot4_sensor_health", "1", NULL},
-  {"spb_sensor_health", "1", NULL},
-  {"nic_sensor_health", "1", NULL},
-  {"slot1_sel_error", "1", NULL},
-  {"slot2_sel_error", "1", NULL},
-  {"slot3_sel_error", "1", NULL},
-  {"slot4_sel_error", "1", NULL},
-  {"slot1_boot_order", "0000000", NULL},
-  {"slot2_boot_order", "0000000", NULL},
-  {"slot3_boot_order", "0000000", NULL},
-  {"slot4_boot_order", "0000000", NULL},
-  {"slot1_cpu_ppin", "0", NULL},
-  {"slot2_cpu_ppin", "0", NULL},
-  {"slot3_cpu_ppin", "0", NULL},
-  {"slot4_cpu_ppin", "0", NULL},
-  {"fru1_restart_cause", "3", NULL},
-  {"fru2_restart_cause", "3", NULL},
-  {"fru3_restart_cause", "3", NULL},
-  {"fru4_restart_cause", "3", NULL},
-  {"slot1_trigger_hpr", "on", NULL},
-  {"slot2_trigger_hpr", "on", NULL},
-  {"slot3_trigger_hpr", "on", NULL},
-  {"slot4_trigger_hpr", "on", NULL},
-  {"ntp_server", "", key_func_ntp},
+  /* id, name, default value, function */
+  { SLOT1_LAST_PWR_STATE,"pwr_server1_last_state", "on", key_func_pwr_last_state},
+  { SLOT2_LAST_PWR_STATE,"pwr_server2_last_state", "on", key_func_pwr_last_state},
+  { SLOT3_LAST_PWR_STATE,"pwr_server3_last_state", "on", key_func_pwr_last_state},
+  { SLOT4_LAST_PWR_STATE,"pwr_server4_last_state", "on", key_func_pwr_last_state},
+  { SLOT1_SYSFW_VER,"sysfw_ver_slot1", "0", NULL},
+  { SLOT2_SYSFW_VER,"sysfw_ver_slot2", "0", NULL},
+  { SLOT3_SYSFW_VER,"sysfw_ver_slot3", "0", NULL},
+  { SLOT4_SYSFW_VER,"sysfw_ver_slot4", "0", NULL},
+  { SLED_IDENTITY,"identify_sled", "off", key_func_iden_sled},
+  { SLOT1_IDENTITY,"identify_slot1", "off", key_func_iden_slot},
+  { SLOT2_IDENTITY,"identify_slot2", "off", key_func_iden_slot},
+  { SLOT3_IDENTITY,"identify_slot3", "off", key_func_iden_slot},
+  { SLOT4_IDENTITY,"identify_slot4", "off", key_func_iden_slot},
+  { SLED_TIMESTAMP,"timestamp_sled", "0", NULL},
+  { SLOT1_POR_CFG,"slot1_por_cfg", "lps", key_func_por_cfg},
+  { SLOT2_POR_CFG,"slot2_por_cfg", "lps", key_func_por_cfg},
+  { SLOT3_POR_CFG,"slot3_por_cfg", "lps", key_func_por_cfg},
+  { SLOT4_POR_CFG,"slot4_por_cfg", "lps", key_func_por_cfg},
+  { SLOT1_SENSOR_HEALTH,"slot1_sensor_health", "1", NULL},
+  { SLOT2_SENSOR_HEALTH,"slot2_sensor_health", "1", NULL},
+  { SLOT3_SENSOR_HEALTH,"slot3_sensor_health", "1", NULL},
+  { SLOT4_SENSOR_HEALTH,"slot4_sensor_health", "1", NULL},
+  { SPB_SENSOR_HEALTH,"spb_sensor_health", "1", NULL},
+  { NIC_SENSOR_HEALTH,"nic_sensor_health", "1", NULL},
+  { SLOT1_SEL_ERROR,"slot1_sel_error", "1", NULL},
+  { SLOT2_SEL_ERROR,"slot2_sel_error", "1", NULL},
+  { SLOT3_SEL_ERROR,"slot3_sel_error", "1", NULL},
+  { SLOT4_SEL_ERROR,"slot4_sel_error", "1", NULL},
+  { SLOT1_BOOT_ORDER,"slot1_boot_order", "0000000", NULL},
+  { SLOT2_BOOT_ORDER,"slot2_boot_order", "0000000", NULL},
+  { SLOT3_BOOT_ORDER,"slot3_boot_order", "0000000", NULL},
+  { SLOT4_BOOT_ORDER,"slot4_boot_order", "0000000", NULL},
+  { SLOT1_CPU_PPIN,"slot1_cpu_ppin", "0", NULL},
+  { SLOT2_CPU_PPIN,"slot2_cpu_ppin", "0", NULL},
+  { SLOT3_CPU_PPIN,"slot3_cpu_ppin", "0", NULL},
+  { SLOT4_CPU_PPIN,"slot4_cpu_ppin", "0", NULL},
+  { SLOT1_RESTART_CAUSE,"fru1_restart_cause", "3", NULL},
+  { SLOT2_RESTART_CAUSE,"fru2_restart_cause", "3", NULL},
+  { SLOT3_RESTART_CAUSE,"fru3_restart_cause", "3", NULL},
+  { SLOT4_RESTART_CAUSE,"fru4_restart_cause", "3", NULL},
+  { SLOT1_TRIGGER_HPR,"slot1_trigger_hpr", "on", NULL},
+  { SLOT2_TRIGGER_HPR,"slot2_trigger_hpr", "on", NULL},
+  { SLOT3_TRIGGER_HPR,"slot3_trigger_hpr", "on", NULL},
+  { SLOT4_TRIGGER_HPR,"slot4_trigger_hpr", "on", NULL},
+  { NTP_SERVER,"ntp_server", "", key_func_ntp},
   /* Add more Keys here */
-  {LAST_KEY, LAST_KEY, NULL} /* This is the last key of the list */
+  { LAST_ID,"", "", NULL} /* This is the last id of the list */
 };
 
 struct power_coeff {
@@ -336,6 +443,60 @@ static const struct power_coeff pwr_cali_table[] = {
   { 0.0,    0.0 }
 };
 
+static const struct power_coeff nd_curr_cali_table[] = {
+  { 5.61,  0.90223 },
+  { 8.86,  0.90839 },
+  { 11.02, 0.91118 },
+  { 14.25, 0.91505 },
+  { 16.42, 0.91578 },
+  { 19.65, 0.91805 },
+  { 21.84, 0.91753 },
+  { 25.08, 0.91916 },
+  { 27.24, 0.91919 },
+  { 30.47, 0.92037 },
+  { 32.63, 0.92073 },
+  { 35.88, 0.92085 },
+  { 38.04, 0.92099 },
+  { 41.27, 0.92170 },
+  { 43.44, 0.92161 },
+  { 46.69, 0.92188 },
+  { 48.84, 0.92204 },
+  { 52.06, 0.92261 },
+  { 54.22, 0.92296 },
+  { 57.47, 0.92291 },
+  { 59.60, 0.92354 },
+  { 64.99, 0.92355 },
+  { 70.36, 0.92427 },
+  { 0.0,   0.0 }
+};
+
+static const struct power_coeff nd_pwr_cali_table[] = {
+  { 67.93,  0.90470 },
+  { 107.03, 0.91098 },
+  { 133.02, 0.91341 },
+  { 171.78, 0.91617 },
+  { 197.46, 0.91742 },
+  { 235.96, 0.91852 },
+  { 261.49, 0.91934 },
+  { 297.14, 0.92767 },
+  { 324.34, 0.92010 },
+  { 361.76, 0.92101 },
+  { 386.67, 0.92129 },
+  { 423.91, 0.92169 },
+  { 448.61, 0.92200 },
+  { 485.48, 0.92252 },
+  { 509.98, 0.92255 },
+  { 546.53, 0.92318 },
+  { 570.71, 0.92309 },
+  { 606.66, 0.92362 },
+  { 630.64, 0.92402 },
+  { 666.14, 0.92407 },
+  { 688.79, 0.92530 },
+  { 748.16, 0.92401 },
+  { 806.35, 0.92557 },
+  { 0.0,    0.0 }
+};
+
 static const char *sock_path_asd_bic[MAX_NODES+1] = {
   "",
   SOCK_PATH_ASD_BIC "_1",
@@ -367,15 +528,6 @@ static const char *imc_log_path[MAX_NODES+1] = {
   IMC_LOG_FILE "3",
   IMC_LOG_FILE "4"
 };
-
-#if defined CONFIG_FBY2_ND
-static const char *cper_dump_path[MAX_NODES] = {
-  CPER_CRASHDUMP_FILE "1",
-  CPER_CRASHDUMP_FILE "2",
-  CPER_CRASHDUMP_FILE "3",
-  CPER_CRASHDUMP_FILE "4"
-};
-#endif
 
 struct ras_pcie_aer_info {
   char *name;
@@ -650,8 +802,7 @@ pal_key_check(char *key) {
   int i;
 
   i = 0;
-  while (strcmp(key_cfg[i].name, LAST_KEY)) {
-
+  while (key_cfg[i].id != LAST_ID) {
     // If Key is valid, return success
     if (!strcmp(key, key_cfg[i].name))
       return i;
@@ -734,10 +885,38 @@ key_func_ntp(int event, void *arg) {
 
 int
 pal_get_key_value(char *key, char *value) {
+  int index;
 
   // Check is key is defined and valid
-  if (pal_key_check(key) < 0)
+  if ((index = pal_key_check(key)) < 0)
     return -1;
+
+  switch (key_cfg[index].id) {
+    case SLOT1_LAST_PWR_STATE:
+    case SLOT1_POR_CFG:
+    case SLOT1_SYSFW_VER:
+    case SLOT1_BOOT_ORDER:
+    case SLOT1_CPU_PPIN:
+    case SLOT1_RESTART_CAUSE:
+    case SLOT1_TRIGGER_HPR:
+      if (!pal_is_slot_server(FRU_SLOT1)) {
+        return -1;
+      }
+      break;
+    case SLOT3_LAST_PWR_STATE:
+    case SLOT3_POR_CFG:
+    case SLOT3_SYSFW_VER:
+    case SLOT3_BOOT_ORDER:
+    case SLOT3_CPU_PPIN:
+    case SLOT3_RESTART_CAUSE:
+    case SLOT3_TRIGGER_HPR:
+      if (!pal_is_slot_server(FRU_SLOT3)) {
+        return -1;
+      }
+      break;
+    default:
+      break;
+  }
 
   return kv_get(key, value, NULL, KV_FPERSIST);
 }
@@ -749,6 +928,33 @@ pal_set_key_value(char *key, char *value) {
   // Check is key is defined and valid
   if ((index = pal_key_check(key)) < 0)
     return -1;
+
+  switch (key_cfg[index].id) {
+    case SLOT1_LAST_PWR_STATE:
+    case SLOT1_POR_CFG:
+    case SLOT1_SYSFW_VER:
+    case SLOT1_BOOT_ORDER:
+    case SLOT1_CPU_PPIN:
+    case SLOT1_RESTART_CAUSE:
+    case SLOT1_TRIGGER_HPR:
+      if (!pal_is_slot_server(FRU_SLOT1)) {
+        return -1;
+      }
+      break;
+    case SLOT3_LAST_PWR_STATE:
+    case SLOT3_POR_CFG:
+    case SLOT3_SYSFW_VER:
+    case SLOT3_BOOT_ORDER:
+    case SLOT3_CPU_PPIN:
+    case SLOT3_RESTART_CAUSE:
+    case SLOT3_TRIGGER_HPR:
+      if (!pal_is_slot_server(FRU_SLOT3)) {
+        return -1;
+      }
+      break;
+    default:
+      break;
+  }
 
   if (key_cfg[index].function) {
     ret = key_cfg[index].function(KEY_BEFORE_SET, value);
@@ -2515,7 +2721,7 @@ pal_get_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *
   int ret;
   uint8_t retry = MAX_READ_RETRY;
   uint16_t vendor_id = 0;
-  uint8_t ffi = 0 ,meff = 0, nvme_ready = 0;
+  uint8_t ffi = 0 ,meff = 0, nvme_ready = 0, major_ver = 0, minor_ver = 0;
 
   if (fby2_get_slot_type(slot_id) == SLOT_TYPE_GPV2) {
     /* Check whether the system is 12V off or on */
@@ -2533,7 +2739,7 @@ pal_get_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *
     }
 
     while (retry) {
-      ret = bic_get_dev_power_status(slot_id, dev_id, &nvme_ready, status, &ffi, &meff, &vendor_id);
+      ret = bic_get_dev_power_status(slot_id, dev_id, &nvme_ready, status, &ffi, &meff, &vendor_id, &major_ver,&minor_ver);
       if (!ret)
         break;
       msleep(50);
@@ -2572,7 +2778,7 @@ pal_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *
   int ret;
   uint8_t retry = MAX_READ_RETRY;
   uint16_t vendor_id = 0;
-  uint8_t ffi = 0 ,meff = 0;
+  uint8_t ffi = 0 ,meff = 0 ,major_ver = 0, minor_ver = 0;
 
   if (fby2_get_slot_type(slot_id) == SLOT_TYPE_GPV2) {
     /* Check whether the system is 12V off or on */
@@ -2590,7 +2796,7 @@ pal_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *
     }
 
     while (retry) {
-      ret = bic_get_dev_power_status(slot_id,dev_id, nvme_ready, status, &ffi, &meff, &vendor_id);
+      ret = bic_get_dev_power_status(slot_id,dev_id, nvme_ready, status, &ffi, &meff, &vendor_id, &major_ver, &minor_ver);
       if (!ret)
         break;
       msleep(50);
@@ -3891,6 +4097,29 @@ get_sensor_desc(uint8_t fru, uint8_t snr_num) {
 }
 
 int
+pal_check_board_type(uint8_t *status) {
+  char path[64] = {0};
+  int val_board_id, val_rev_id2;
+
+  snprintf(path, sizeof(path), GPIO_VAL, GPIO_BOARD_ID);
+  if (read_device(path, &val_board_id)) {
+    return -1;
+  }
+
+  snprintf(path, sizeof(path), GPIO_VAL, GPIO_BOARD_REV_ID2);
+  if (read_device(path, &val_rev_id2)) {
+    return -1;
+  }
+
+  if ((1 == val_board_id) && (0 == val_rev_id2))
+    *status = 1;
+  else
+    *status = 0;
+
+  return 0;
+}
+
+int
 pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
 
   uint8_t status;
@@ -3933,7 +4162,7 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
 
   while (retry) {
     ret = fby2_sensor_read(fru, sensor_num, value);
-    if ((ret >= 0) || (ret == EER_READ_NA))
+    if ((ret >= 0) || (ret == EER_READ_NA) || (ret == EER_UNHANDLED))
       break;
     msleep(50);
     retry--;
@@ -3949,6 +4178,9 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
     if (ret == EER_READ_NA)
       return ERR_SENSOR_NA;
 
+    if (ret == EER_UNHANDLED)
+      return -1;
+
     if(fru == FRU_SPB || fru == FRU_NIC)
       return -1;
     if(pal_get_server_power(fru, &status) < 0)
@@ -3962,11 +4194,21 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
   else {
     // On successful sensor read
     if (fru == FRU_SPB) {
+      uint8_t is_nd_board = 0;
+      pal_check_board_type(&is_nd_board);
       if (sensor_num == SP_SENSOR_HSC_OUT_CURR || sensor_num == SP_SENSOR_HSC_PEAK_IOUT) {
-        power_value_adjust(curr_cali_table, (float *)value);
+        if (is_nd_board == 1) {
+          power_value_adjust(nd_curr_cali_table, (float *)value);
+        } else {
+          power_value_adjust(curr_cali_table, (float *)value);
+        }
       }
       if (sensor_num == SP_SENSOR_HSC_IN_POWER || sensor_num == SP_SENSOR_HSC_PEAK_PIN) {
-        power_value_adjust(pwr_cali_table, (float *)value);
+        if (is_nd_board == 1) {
+          power_value_adjust(nd_pwr_cali_table, (float *)value);
+        } else {
+          power_value_adjust(pwr_cali_table, (float *)value);
+        }
       }
       if (sensor_num == SP_SENSOR_INLET_TEMP) {
         apply_inlet_correction((float *)value);
@@ -4288,7 +4530,7 @@ pal_set_def_key_value() {
   char key[MAX_KEY_LEN] = {0};
 
   i = 0;
-  for (i = 0; strcmp(key_cfg[i].name, LAST_KEY) != 0; i++) {
+  for (i = 0; key_cfg[i].id != LAST_ID; i++) {
     if ((ret = kv_set(key_cfg[i].name, key_cfg[i].def_val, 0, KV_FPERSIST | KV_FCREATE)) < 0) {
 #ifdef DEBUG
       syslog(LOG_WARNING, "pal_set_def_key_value: kv_set failed. %d", ret);
@@ -4387,13 +4629,39 @@ pal_get_fru_devtty(uint8_t fru, char *devtty) {
 void
 pal_dump_key_value(void) {
   int i = 0;
-  int ret;
-
   char value[MAX_VALUE_LEN] = {0x0};
 
-  while (strcmp(key_cfg[i].name, LAST_KEY)) {
+  while (key_cfg[i].id != LAST_ID) {
+    switch (key_cfg[i].id) {
+      case SLOT1_LAST_PWR_STATE:
+      case SLOT1_POR_CFG:
+      case SLOT1_SYSFW_VER:
+      case SLOT1_BOOT_ORDER:
+      case SLOT1_CPU_PPIN:
+      case SLOT1_RESTART_CAUSE:
+      case SLOT1_TRIGGER_HPR:
+        if (!pal_is_slot_server(FRU_SLOT1)) {
+          i++;
+          continue;
+        }
+        break;
+      case SLOT3_LAST_PWR_STATE:
+      case SLOT3_POR_CFG:
+      case SLOT3_SYSFW_VER:
+      case SLOT3_BOOT_ORDER:
+      case SLOT3_CPU_PPIN:
+      case SLOT3_RESTART_CAUSE:
+      case SLOT3_TRIGGER_HPR:
+        if (!pal_is_slot_server(FRU_SLOT3)){
+          i++;
+          continue;
+        }
+        break;
+      default:
+        break;
+    }
     printf("%s:", key_cfg[i].name);
-    if ((ret = kv_get(key_cfg[i].name, value, NULL, KV_FPERSIST)) < 0) {
+    if ((kv_get(key_cfg[i].name, value, NULL, KV_FPERSIST)) < 0) {
       printf("\n");
     } else {
       printf("%s\n",  value);
@@ -5453,6 +5721,61 @@ pal_parse_sel_ep(uint8_t fru, uint8_t *sel, char *error_log)
 
 #if defined(CONFIG_FBY2_ND)
 int
+parse_psb_error_sel_nd(uint8_t *event_data, char *error_log) {
+  uint8_t *ed = &event_data[3];
+
+  strcpy(error_log, "");
+  switch (ed[1]) {
+    case 0x3E:
+      strcat(error_log, "P0: Error reading fuse info");
+      break;
+    case 0x7B:
+      strcat(error_log, "P0: OEM BIOS Signing Key failed signature verification");
+      break;
+    case 0x6F:
+      strcat(error_log, "P0: OEM BIOS Signing Key Usage flag violation");
+      break;
+    case 0x7C:
+      strcat(error_log, "P0: Platform Vendor ID and/or Model ID binding violation");
+      break;
+    case 0x78:
+      strcat(error_log, "P0: BIOS RTM Signature entry not found");
+      break;
+    case 0x79:
+      strcat(error_log, "P0: BIOS Copy to DRAM failed");
+      break;
+    case 0x7A:
+      strcat(error_log, "P0: BIOS RTM Signature verification failed");
+      break;
+    case 0x7D:
+      strcat(error_log, "P0: BIOS Copy bit is unset for reset image");
+      break;
+    case 0x7E:
+      strcat(error_log, "P0: Requested fuse is already blown, reblow will cause ASIC malfunction");
+      break;
+    case 0x7F:
+      strcat(error_log, "P0: Error with actual fusing operation");
+      break;
+    case 0x80:
+      strcat(error_log, "P1: Error reading fuse info");
+      break;
+    case 0x81:
+      strcat(error_log, "P1: Platform Vendor ID and/or Model ID binding violation");
+      break;
+    case 0x82:
+      strcat(error_log, "P1: Requested fuse is already blown, reblow will cause ASIC malfunction");
+      break;
+    case 0x83:
+      strcat(error_log, "P1: Error with actual fusing operation");
+      break;
+    default:
+      strcat(error_log, "Unknown");
+      break;
+  }
+  return 0;
+}
+
+int
 parse_usb_error_sel_nd(uint8_t fru, uint8_t *event_data, char *error_log) {
   uint8_t *ed = &event_data[3];
   char temp_log[512] = {0};
@@ -5463,7 +5786,7 @@ parse_usb_error_sel_nd(uint8_t fru, uint8_t *event_data, char *error_log) {
       strcat(error_log, " Uncorrectable");
   }
   snprintf(temp_log, sizeof(temp_log), " (Error Source %02X)", ed[1]);
-  strcat(error_log, temp_log);  
+  strcat(error_log, temp_log);
   return 0;
 }
 
@@ -5480,7 +5803,7 @@ parse_smn_error_sel_nd(uint8_t fru, uint8_t *event_data, char *error_log) {
   snprintf(temp_log, sizeof(temp_log), " (BUS ID %02X)", ed[1]);
   strcat(error_log, temp_log);
   snprintf(temp_log, sizeof(temp_log), " Error Source %02X", ed[2] & 0x0F);
-  strcat(error_log, temp_log);  
+  strcat(error_log, temp_log);
   return 0;
 }
 
@@ -5517,7 +5840,15 @@ parse_mem_error_sel_nd(uint8_t fru, uint8_t snr_num, uint8_t *event_data, char *
   }
 
   // Common routine for both MEM_ECC_ERR and MEMORY_ERR_LOG_DIS
-  snprintf(temp_log, sizeof(temp_log), " (DIMM %02X)", ed[2]);
+  chn_num = (ed[2] & 0x1C) >> 2;
+  bool support_mem_mapping = false;
+  char mem_mapping_string[32];
+  pal_parse_mem_mapping_string(chn_num, &support_mem_mapping, mem_mapping_string);
+  if(support_mem_mapping) {
+    snprintf(temp_log, sizeof(temp_log), " (DIMM %s)", mem_mapping_string);
+  } else {
+    snprintf(temp_log, sizeof(temp_log), " (DIMM %02X)", ed[2]);
+  }
   strcat(error_log, temp_log);
 
   snprintf(temp_log, sizeof(temp_log), " Logical Rank %d", ed[1] & 0x03);
@@ -5581,6 +5912,10 @@ pal_parse_sel_nd(uint8_t fru, uint8_t *sel, char *error_log)
       break;
     case USB_ERR:
       parse_usb_error_sel_nd(fru, event_data, error_log);
+      parsed = true;
+      break;
+    case PSB_ERR:
+      parse_psb_error_sel_nd(event_data, error_log);
       parsed = true;
       break;
     case MEMORY_ECC_ERR:
@@ -5962,6 +6297,8 @@ pal_set_post_start_timestamp(uint8_t fru, uint8_t method) {
   char cvalue[MAX_VALUE_LEN] = {0};
   struct timespec ts;
   long value = -1;
+  int ret = 0, spb_type = 0;
+  uint8_t nvme_ready = DRIVE_NOT_READY;
 
   if (method == POST_SET) {
     clock_gettime(CLOCK_MONOTONIC,&ts);
@@ -5986,6 +6323,19 @@ pal_set_post_start_timestamp(uint8_t fru, uint8_t method) {
 
   sprintf(cvalue,"%ld",value);
 
+  spb_type = fby2_common_get_spb_type();
+
+  if (spb_type == TYPE_SPB_YV250) {
+    ret = pal_get_nvme_ready(fru - 1, &nvme_ready);
+    if (ret != 0) {
+      nvme_ready = DRIVE_NOT_READY;
+    }
+    // If NVMe is ready, update the nvme_ready_timestamp.
+    if (nvme_ready == DRIVE_READY) {
+      pal_set_nvme_ready_timestamp(fru - 1);
+    }
+  }
+  
   return kv_set(key,cvalue,0,0);
 }
 
@@ -9853,30 +10203,206 @@ memory_error_sec_sel_parse(uint8_t slot, uint8_t *req_data, uint8_t req_len)
 }
 
 #if defined(CONFIG_FBY2_ND)
-uint8_t
-save_cper_to_binary_file(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
-  uint8_t completion_code = CC_UNSPECIFIED_ERROR;
-  uint8_t total_page_num = 0;
-  uint8_t current_page_num = 0;
-  static uint32_t last_dump_ts[MAX_NODES] = {0};
-  struct timespec ts;
-  FILE *pFile;
 
-  if(req_len > CPER_HEADER_SIZE) {
-    total_page_num = req_data[CPER_TOTAL_PAGE_INDEX];
-    current_page_num = req_data[CPER_CURRENT_PAGE_INDEX];
-    //check page number is vaild
-    if(total_page_num >= current_page_num) {
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      pFile = fopen(cper_dump_path[slot], (ts.tv_sec > last_dump_ts[slot])?"w":"a+");
-      last_dump_ts[slot] = ts.tv_sec + CPER_COMMAND_TIME_RANGE;
-      if( NULL == pFile ) {
-          return completion_code;
-      } else {
-          //Remove 0~12 byte define Header
-          fwrite((req_data + CPER_HEADER_SIZE),1, (req_len - CPER_HEADER_SIZE), pFile);
-      }
-      fclose(pFile);
+static void* generate_dump(void* arg) {
+  pthread_detach(pthread_self());
+  char* cmd = malloc(sizeof(char) * MAX_CRASHDUMP_CMD_SIZE);
+  if (arg && cmd) {
+    int slot_id = *(int*)arg;
+    memset(cmd, 0, MAX_CRASHDUMP_CMD_SIZE);
+    snprintf(cmd, MAX_CRASHDUMP_CMD_SIZE, "%s slot%d", CRASHDUMP_ND_BIN, slot_id);
+    system(cmd);
+
+    free(cmd);
+    free(arg);
+  }
+
+  pthread_exit(NULL);
+}
+
+uint8_t crashdump_initial(uint8_t slot) {
+  char fname[128];
+  uint8_t completion_code = CC_UNSPECIFIED_ERROR;
+
+  //check if crashdump is already running
+  if (pal_is_crashdump_ongoing(slot))
+  {
+    syslog(LOG_CRIT, "Another auto crashdump for slot%d is running.", slot);
+    return completion_code;
+  }
+  else {
+    snprintf(fname, sizeof(fname), CRASHDUMP_PID_PATH, slot);
+    FILE *fp;
+    fp = fopen(fname,"w");
+    fclose(fp);
+
+    //Set crashdump timestamp
+    struct sysinfo info;
+    char value[64];
+    sysinfo(&info);
+    snprintf(value, sizeof(value), "%ld", (info.uptime+1200));
+    snprintf(fname, sizeof(fname), CRASHDUMP_TIMESTAMP_FILE, slot);
+    kv_set(fname, value, 0, KV_FCREATE); 
+  }
+
+  completion_code = CC_SUCCESS;
+  return completion_code;
+}
+
+uint8_t save_mca_to_file(
+    uint8_t slot,
+    uint8_t* req_data,
+    uint8_t req_len,
+    uint8_t* res_data,
+    uint8_t* res_len) {
+  static int mca_list_counter[MAX_NODES] = {0};
+  static valid_bank_id list_vaild_pair[MAX_NODES][MAX_VAILD_LIST_LENGTH];
+
+  uint8_t completion_code = CC_UNSPECIFIED_ERROR;
+
+  FILE* pFile;
+  char file_path[MAX_CRASHDUMP_FILE_NAME_LENGTH] = "";
+  bool last_bank = false;
+
+  if(mca_list_counter[slot] == 0) {
+    if(crashdump_initial(slot + 1)) {
+      return completion_code;
+    }
+  }
+
+  /* slot is 0 based, slot_id is 1 based */
+  snprintf(
+      file_path, MAX_CRASHDUMP_FILE_NAME_LENGTH, MCA_DECODED_LOG_PATH, slot + 1);
+
+  pFile = fopen(file_path, "a+");
+  if (NULL == pFile)
+    return completion_code;
+
+  mca_bank* pbank = (mca_bank*)req_data;
+  if (MCA_BANK_TYPE_NORMAL == pbank->bank_type) {
+    fprintf(
+        pFile,
+        " %s : 0x%02X, %s : 0x%02X \n",
+        "Bank ID",
+        pbank->bank_id,
+        "Core ID",
+        pbank->core_id);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_CTRL",
+        pbank->mca_ctrl_hf,
+        pbank->mca_ctrl_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_STATUS",
+        pbank->mca_status_hf,
+        pbank->mca_status_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_ADDR",
+        pbank->mca_addr_hf,
+        pbank->mca_addr_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_MISC0",
+        pbank->mca_misc0_hf,
+        pbank->mca_misc0_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_CTRL_MASK",
+        pbank->mca_ctrl_mask_hf,
+        pbank->mca_ctrl_mask_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_CONFIG",
+        pbank->mca_config_hf,
+        pbank->mca_config_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_IPID",
+        pbank->mca_ipid_hf,
+        pbank->mca_ipid_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_SYND",
+        pbank->mca_synd_hf,
+        pbank->mca_synd_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_DESTAT",
+        pbank->mca_destat_hf,
+        pbank->mca_destat_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_DEADDR",
+        pbank->mca_deaddr_hf,
+        pbank->mca_deaddr_lf);
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X_%08X \n",
+        "MCA_MISC1",
+        pbank->mca_misc1_hf,
+        pbank->mca_misc1_lf);
+
+    list_vaild_pair[slot][mca_list_counter[slot]].bank_id = pbank->bank_id;
+    list_vaild_pair[slot][mca_list_counter[slot]].core_id = pbank->core_id;
+    mca_list_counter[slot]++;
+
+  } else if (MCA_BANK_TYPE_VIRTUAL == pbank->bank_type) {
+    fprintf(pFile, " %s : \n", "Virtual Bank");
+    fprintf(
+        pFile,
+        " %-15s : 0x%08X \n",
+        "S5_RESET_STATUS",
+        pbank->bank_s5_reset_status);
+    fprintf(pFile, " %-15s : 0x%08X \n", "BREAKEVENT", pbank->bank_breakevent);
+    fprintf(pFile, " %-15s : ", "VAILD LIST");
+    for (int i = 0; i < pbank->valid_bank_num; i++) {
+      fprintf(
+          pFile,
+          "(0x%02x,0x%02x) ",
+          pbank->valid_bank_list[i].bank_id,
+          pbank->valid_bank_list[i].core_id);
+    }
+
+    fprintf(pFile, "\n");
+    fprintf(pFile, " %-15s : ", "RECEIVE LIST");
+    for (int i = 0; i < mca_list_counter[slot]; i++) {
+      fprintf(
+          pFile,
+          "(0x%02x,0x%02x) ",
+          list_vaild_pair[slot][i].bank_id,
+          list_vaild_pair[slot][i].core_id);
+    }
+
+    fprintf(pFile, "\n");
+
+    last_bank = true;
+  } else {
+    fprintf(pFile, "unknown MCA bank type: %d \n", pbank->bank_type);
+  }
+
+  fclose(pFile);
+
+  if (last_bank) {
+    mca_list_counter[slot] = 0;
+
+    pthread_t tid_crashdump;
+    int* slot_id = malloc(sizeof(int));
+    *slot_id = slot + 1; // slot_id is 1 based
+    if (pthread_create(&tid_crashdump, NULL, generate_dump, (void*)slot_id)) {
+      free(slot_id);
+      return completion_code;
     }
   }
 
@@ -9890,13 +10416,17 @@ pal_add_cper_log(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_
   uint8_t completion_code = CC_UNSPECIFIED_ERROR;
 
 #if defined(CONFIG_FBY2_ND)
-  if ( (slot > 0) && (slot <= MAX_NODES) ) {
-      // slot is 1 based
-      save_cper_to_binary_file(slot - 1 , req_data, req_len - IPMI_MN_REQ_HDR_SIZE, res_data, res_len);
-      return CC_SUCCESS;
-   } else {
-       return CC_PARAM_OUT_OF_RANGE;
-   }
+  if ((slot > 0) && (slot <= MAX_NODES)) {
+    completion_code = save_mca_to_file(
+        slot - 1, /* slot is 1 based */
+        req_data + MCA_CMD_HEADER_LENGTH,
+        req_len - IPMI_MN_REQ_HDR_SIZE - MCA_CMD_HEADER_LENGTH,
+        res_data,
+        res_len);
+    return completion_code;
+  } else {
+    return CC_PARAM_OUT_OF_RANGE;
+  }
 #endif
 
   if(memcmp(Memory_Error_Section, req_data+8, sizeof(Memory_Error_Section)) == 0) {
@@ -10338,4 +10868,83 @@ int
 pal_get_nic_fru_id(void)
 {
   return FRU_NIC;
+}
+
+int
+pal_set_sdr_update_flag(uint8_t slot, uint8_t update) {
+  return bic_set_sdr_threshold_update_flag(slot,update);
+}
+
+int
+pal_get_sdr_update_flag(uint8_t slot) {
+  return bic_get_sdr_threshold_update_flag(slot);
+}
+
+int
+pal_parse_mem_mapping_string(uint8_t channel, bool *support_mem_mapping, char *error_log) {
+  if ( !support_mem_mapping ) {
+    return  PAL_ENOTSUP;
+  }
+  if ( !error_log ) {
+    *support_mem_mapping = false;
+    return PAL_EOK;
+  }
+  error_log[0] = '\0';
+  *support_mem_mapping = false;
+
+#if defined(CONFIG_FBY2_ND)  
+  //uint8_t channel = (sel[9] & 0x0f);
+  *support_mem_mapping = true;
+
+  switch (channel) {
+    case 2:
+      strcpy(error_log, "C0");
+      break;
+    case 3:
+      strcpy(error_log, "D0");
+      break;
+    case 6:
+      strcpy(error_log, "G0");
+      break;
+    case 7:
+      strcpy(error_log, "H0");
+      break;
+    default:
+      *support_mem_mapping = false;
+      break;
+  }
+#endif
+  return 0;
+}
+bool
+pal_is_modify_sel_time(uint8_t *sel, int size) {
+  bool need = false;
+#if defined(CONFIG_FBY2_ND)
+
+  if(sel && (11 < size)) {
+    uint8_t snr_num = sel[11];
+    uint8_t *event_data = &sel[10];
+    uint8_t *ed = &event_data[3];
+
+    if(snr_num == BIC_ND_SENSOR_SYSTEM_STATUS) {
+      switch (ed[0] & 0x0F) {
+        case 0x02:
+        case 0x04:
+        case 0x05:
+        case 0x06:
+          //Throttle event
+          //check Assert or Deassert
+          if ((event_data[2] & 0x80) != 0) { //Deassert
+            need = true;
+          }
+          break;
+        default:
+          need = false;
+          break;
+      }
+    }
+  }
+
+#endif
+  return need;
 }

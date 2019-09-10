@@ -24,6 +24,7 @@
 #include <openbmc/obmc-pal.h>
 #include "pal_sensors.h"
 #include "pal_health.h"
+#include "pal_power.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +35,7 @@ extern "C" {
 #define LARGEST_DEVICE_NAME (120)
 #define UNIT_DIV            (1000)
 #define ERR_NOT_READY       (-2)
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 extern size_t pal_pwm_cnt;
 extern size_t pal_tach_cnt;
@@ -48,11 +50,13 @@ enum {
 };
 
 enum {
-  FRU_ALL = 0,
-  FRU_MB = 1,
-  FRU_PDB = 2,
+  FRU_ALL  = 0,
+  FRU_MB   = 1,
+  FRU_PDB  = 2,
   FRU_NIC0 = 3,
   FRU_NIC1 = 4,
+  FRU_DBG  = 5,
+  FRU_BMC  = 6,
 };
 
 #define MAX_NUM_FRUS    (4)
@@ -79,24 +83,56 @@ enum {
   BOOT_DEVICE_RESERVED = 0xff,
 };
 
-int pal_is_fru_prsnt(uint8_t fru, uint8_t *status);
-int pal_is_slot_server(uint8_t fru);
-int pal_get_server_power(uint8_t fru, uint8_t *status);
-int pal_set_server_power(uint8_t fru, uint8_t cmd);
-int pal_sled_cycle(void);
-int pal_set_rst_btn(uint8_t slot, uint8_t status);
+enum {
+  IPMI_CHANNEL_0 = 0,
+  IPMI_CHANNEL_1,
+  IPMI_CHANNEL_2,
+  IPMI_CHANNEL_3,
+  IPMI_CHANNEL_4,
+  IPMI_CHANNEL_5,
+  IPMI_CHANNEL_6,
+  IPMI_CHANNEL_7,
+  IPMI_CHANNEL_8,
+  IPMI_CHANNEL_9,
+  IPMI_CHANNEL_A,
+  IPMI_CHANNEL_B,
+  IPMI_CHANNEL_C,
+  IPMI_CHANNEL_D,
+  IPMI_CHANNEL_E,
+  IPMI_CHANNEL_F,
+};
+
+enum {
+  I2C_BUS_0 = 0,
+  I2C_BUS_1,
+  I2C_BUS_2,
+  I2C_BUS_3,
+  I2C_BUS_4,
+  I2C_BUS_5,
+  I2C_BUS_6,
+  I2C_BUS_7,
+  I2C_BUS_8,
+  I2C_BUS_9,
+  I2C_BUS_10,
+  I2C_BUS_11,
+  I2C_BUS_12,
+  I2C_BUS_13,
+  I2C_BUS_14,
+  I2C_BUS_15,
+  I2C_BUS_16,
+  I2C_BUS_17,
+  I2C_BUS_18,
+  I2C_BUS_19,
+  I2C_BUS_20,
+  I2C_BUS_21,
+  I2C_BUS_22,
+  I2C_BUS_23,
+};
+
 int pal_set_led(uint8_t slot, uint8_t status);
 int pal_set_id_led(uint8_t slot, uint8_t status);
-int pal_get_fru_id(char *fru_str, uint8_t *fru);
-int pal_get_fru_name(uint8_t fru, char *name);
-int pal_get_key_value(char *key, char *value);
-int pal_set_key_value(char *key, char *value);
-int pal_get_last_pwr_state(uint8_t fru, char *state);
-int pal_set_last_pwr_state(uint8_t fru, char *state);
-bool is_server_off(void);
-void pal_update_ts_sled();
-void pal_get_chassis_status(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len);
 int read_device(const char *device, int *value);
+int pal_get_rst_btn(uint8_t *status);
 
 
 #ifdef __cplusplus

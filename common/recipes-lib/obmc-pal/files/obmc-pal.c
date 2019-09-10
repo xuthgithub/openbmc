@@ -30,6 +30,7 @@
 #include <sys/wait.h>
 #include <openbmc/kv.h>
 #include <openbmc/ipmi.h>
+#include <openbmc/ipmb.h>
 
 #define GPIO_VAL "/sys/class/gpio/gpio%d/value"
 
@@ -185,7 +186,12 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log)
   uint8_t general_info = (uint8_t) sel[3];
   uint8_t error_type = general_info & 0x0f;
   uint8_t plat;
+  uint8_t dimm_failure_event = (uint8_t) sel[12];
+  uint8_t mem_error_type;
+  uint8_t channel;
+  bool support_mem_mapping = false;
   char dimm_fail_event[][64] = {"Memory training failure", "Memory correctable error", "Memory uncorrectable error", "Reserved"};
+  char mem_mapping_string[32];
   error_log[0] = '\0';
 
   switch (error_type) {
@@ -202,9 +208,55 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log)
       }
       break;
     case UNIFIED_MEM_ERR:
-      sprintf(error_log, "GeneralInfo: MemErr(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, \
-                          DIMM Failure Event: %s, Major Code: 0x%02X, Minor Code: 0x%02X",
-              general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, dimm_fail_event[sel[12]&0x03], sel[13], sel[14]);
+      plat = (dimm_failure_event & 0x80) >> 7;
+      mem_error_type = (dimm_failure_event & 0x03);
+      channel = (sel[9] & 0x0f);
+      pal_parse_mem_mapping_string(channel, &support_mem_mapping, mem_mapping_string);
+
+      switch (mem_error_type) {
+        case MEMORY_TRAINING_ERR:
+          if(support_mem_mapping) {
+            if (plat == 0) { //Intel
+              sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, DIMM %s, \
+                                DIMM Failure Event: %s, Major Code: 0x%02X, Minor Code: 0x%02X",
+                    general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, mem_mapping_string, dimm_fail_event[sel[12]&0x03], sel[13], sel[14]);
+            } else { //AMD
+              int16_t minor_code = sel[15] << 8 | sel[14];
+              sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, DIMM %s, \
+                                DIMM Failure Event: %s, Major Code: 0x%02X, Minor Code: 0x%04X",
+                    general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, mem_mapping_string, dimm_fail_event[sel[12]&0x03], sel[13], minor_code);
+            }
+          } else {
+            if (plat == 0) { //Intel
+              sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, \
+                                DIMM Failure Event: %s, Major Code: 0x%02X, Minor Code: 0x%02X",
+                    general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, dimm_fail_event[sel[12]&0x03], sel[13], sel[14]);
+            } else { //AMD
+              int16_t minor_code = sel[15] << 8 | sel[14];
+              sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, \
+                                DIMM Failure Event: %s, Major Code: 0x%02X, Minor Code: 0x%04X",
+                    general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, dimm_fail_event[sel[12]&0x03], sel[13], minor_code);
+            }
+          }
+          break;
+        case MEMORY_CORRECTABLE_ERR:
+        case MEMORY_UNCORRECTABLE_ERR:
+          if(support_mem_mapping) {
+            sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, DIMM %s, \
+                          DIMM Failure Event: %s",
+                general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, mem_mapping_string, dimm_fail_event[sel[12]&0x03]);
+          } else {
+            sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, \
+                          DIMM Failure Event: %s",
+                general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, dimm_fail_event[sel[12]&0x03]);
+          }
+          break;
+        default:
+          sprintf(error_log, "GeneralInfo: MEMORY_ECC_ERR(0x%02X), DIMM Slot Location: Sled %02X/Socket %02X, Channel %02X, Slot %02X, \
+                        DIMM Failure Event: %s",
+              general_info, ((sel[8]>>4) & 0x03), sel[8] & 0x0f, sel[9] & 0x0f, sel[10] & 0x0f, dimm_fail_event[sel[12]&0x03]);
+          break;
+      }
       break;
     default:
       sprintf(error_log, "Undefined Error Type(0x%02X), Raw: %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
@@ -213,6 +265,18 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log)
   }
 
   return 0;
+}
+
+int __attribute__((weak))
+pal_parse_mem_mapping_string(uint8_t channel, bool *support_mem_mapping, char *error_log)
+{
+  if ( support_mem_mapping ) {
+    *support_mem_mapping = false;
+  }
+  if (error_log) {
+    error_log[0] = '\0';
+  }
+  return PAL_EOK;
 }
 
 int __attribute__((weak))
@@ -575,6 +639,9 @@ pal_get_x86_event_sensor_name(uint8_t fru, uint8_t snr_num,
         break;
       case USB_ERR:
         sprintf(name, "USB_ERR");
+        break;
+      case PSB_ERR:
+        sprintf(name, "PSB_ERR");
         break;
       case MEMORY_ECC_ERR:
         sprintf(name, "MEMORY_ECC_ERR");
@@ -2396,4 +2463,55 @@ int __attribute__((weak))
 pal_get_nic_fru_id(void)
 {
   return -1;
+}
+
+int __attribute__((weak))
+pal_get_bmc_ipmb_slave_addr(uint16_t *slave_addr, uint8_t bus_id)
+{
+  *slave_addr = BMC_SLAVE_ADDR;
+  return 0;
+}
+
+int __attribute__((weak))
+pal_is_mcu_ready(uint8_t bus)
+{
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_wait_mcu_ready2update(uint8_t bus)
+{
+  sleep(2);
+  return 0;
+}
+
+int __attribute__((weak))
+pal_set_sdr_update_flag(uint8_t slot, uint8_t update) {
+  return 0;
+}
+
+int __attribute__((weak))
+pal_get_sdr_update_flag(uint8_t slot) {
+  return 0;
+}
+
+int __attribute__((weak))
+pal_check_fw_image(uint8_t fru, const char *comp, const char *path) {
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_fw_update_prepare(uint8_t fru, const char *comp) {
+  return 0;
+}
+
+int __attribute__((weak))
+pal_fw_update_finished(uint8_t fru, const char *comp, int status) {
+  return status;
+}
+
+bool __attribute__((weak))
+pal_is_modify_sel_time(uint8_t *sel, int size) {
+
+  return false;
 }

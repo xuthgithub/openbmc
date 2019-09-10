@@ -29,6 +29,8 @@ IMAGE_INSTALL += " \
   plat-utils \
   ipmbd \
   ipmb-util \
+  gpiod \
+  e2fsprogs \
   "
 
 IMAGE_FEATURES += " \

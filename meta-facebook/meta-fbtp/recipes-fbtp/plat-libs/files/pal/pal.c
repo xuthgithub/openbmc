@@ -86,13 +86,13 @@
 #define TACH_DIR "/sys/devices/platform/ast_pwm_tacho.0"
 #define ADC_DIR "/sys/devices/platform/ast_adc.0"
 
-#define EEPROM_RISER     "/sys/devices/platform/ast-i2c.1/i2c-1/1-0050/eeprom"
-#define EEPROM_RETIMER   "/sys/devices/platform/ast-i2c.3/i2c-3/3-0055/eeprom"
+#define EEPROM_RISER     "/sys/bus/i2c/devices/1-0050/eeprom"
+#define EEPROM_RETIMER   "/sys/bus/i2c/devices/3-0054/eeprom"
 
-#define MB_INLET_TEMP_DEVICE "/sys/devices/platform/ast-i2c.6/i2c-6/6-004e/hwmon/hwmon*"
-#define MB_OUTLET_TEMP_DEVICE "/sys/devices/platform/ast-i2c.6/i2c-6/6-004f/hwmon/hwmon*"
-#define MEZZ_TEMP_DEVICE "/sys/devices/platform/ast-i2c.8/i2c-8/8-001f/hwmon/hwmon*"
-#define HSC_DEVICE "/sys/devices/platform/ast-i2c.7/i2c-7/7-0011/hwmon/hwmon*"
+#define MB_INLET_TEMP_DEVICE "/sys/bus/i2c/devices/6-004e/hwmon/hwmon*"
+#define MB_OUTLET_TEMP_DEVICE "/sys/bus/i2c/devices/6-004f/hwmon/hwmon*"
+#define MEZZ_TEMP_DEVICE "/sys/bus/i2c/devices/8-001f/hwmon/hwmon*"
+#define HSC_DEVICE "/sys/bus/i2c/devices/7-0011/hwmon/hwmon*"
 
 #define FAN_TACH_RPM "tacho%d_rpm"
 #define ADC_VALUE "adc%d_value"
@@ -111,7 +111,7 @@
 #define GUID_SIZE 16
 #define OFFSET_SYS_GUID 0x17F0
 #define OFFSET_DEV_GUID 0x1800
-#define FRU_EEPROM "/sys/devices/platform/ast-i2c.6/i2c-6/6-0054/eeprom"
+#define FRU_EEPROM     "/sys/bus/i2c/devices/6-0054/eeprom"
 
 #define READING_NA -2
 #define READING_SKIP 1
@@ -3381,11 +3381,12 @@ pal_is_fru_prsnt(uint8_t fru, uint8_t *status) {
       *status = 1;
       break;
     case FRU_NIC:
-      snprintf(full_name, LARGEST_DEVICE_NAME, "%s", "/sys/devices/platform/ast-i2c.8/i2c-8/8-001f/hwmon");
+      snprintf(full_name, LARGEST_DEVICE_NAME, "%s", "/sys/bus/i2c/devices/8-001f/hwmon");
       fp = fopen(full_name, "r");
       if (!fp) {
         return -1;
       }
+      fclose(fp);
       *status = 1;
       break;
     case FRU_RISER_SLOT2:
@@ -3587,14 +3588,15 @@ pal_set_rst_btn(uint8_t slot, uint8_t status) {
 }
 
 // Update the LED for the given slot with the status
-int
-pal_set_led(uint8_t fru, uint8_t status) {
+int 
+pal_set_sled_led(uint8_t fru, uint8_t status) {
   int ret = -1;
 
   gpio_desc_t *gpio = gpio_open_by_shadow("SERVER_POWER_LED");
   if (!gpio) {
     return -1;
   }
+
   //TODO: Need to check power LED control from CPLD
   if (gpio_set_value(gpio, status ? GPIO_VALUE_HIGH : GPIO_VALUE_LOW) == 0) {
     ret = 0;
@@ -3625,7 +3627,7 @@ pal_set_hb_led(uint8_t status) {
 // Update the Identification LED for the given fru with the status
 int
 pal_set_id_led(uint8_t fru, uint8_t status) {
-  return pal_set_led(fru, status);
+  return pal_set_sled_led(fru, status);
 }
 
 // Switch the UART mux to the given fru
@@ -5142,7 +5144,7 @@ int
 pal_get_fruid_eeprom_path(uint8_t fru, char *path) {
   switch(fru) {
   case FRU_MB:
-    sprintf(path, "/sys/devices/platform/ast-i2c.6/i2c-6/6-0054/eeprom");
+    sprintf(path, FRU_EEPROM);
     break;
   default:
     return -1;

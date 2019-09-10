@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <fcntl.h>
@@ -8,19 +9,46 @@
 #include <string.h>
 #include <ctype.h>
 #include <openbmc/kv.h>
+#include <openbmc/libgpio.h>
+#include <openbmc/obmc-i2c.h>
+#include <openbmc/nm.h>
+#include <openbmc/ipmb.h>
 #include "pal.h"
-#include "pal_sensors.h"
 
-#define DEBUG
+//#define DEBUG
+#define GPIO_P3V_BAT_SCALED_EN "P3V_BAT_SCALED_EN"
 
 static int read_adc_val(uint8_t adc_id, float *value);
-static int read_tmp421_val(uint8_t temp_id, float *value);
+static int read_battery_val(uint8_t adc_id, float *value);
+static int read_temp421(uint8_t temp_id, float *value);
+static int read_hsc_iout(uint8_t hsc_id, float *value);
+static int read_hsc_vin(uint8_t hsc_id, float *value);
+static int read_hsc_pin(uint8_t hsc_id, float *value);
+static int read_hsc_temp(uint8_t hsc_id, float *value);
 
 const uint8_t mb_sensor_list[] = {
   MB_SNR_INLET_TEMP,
-  MB_SNR_OUTLET_TEMP,
-  MB_SNR_P12V,
-  MB_SNR_P12V_SB,
+  MB_SNR_OUTLET_TEMP_R,
+  MB_SNR_OUTLET_TEMP_L,
+  MB_SNR_P5V,  
+  MB_SNR_P5V_STBY,
+  MB_SNR_P3V3_STBY,
+  MB_SNR_P3V3,
+  MB_SNR_P3V_BAT,
+  MB_SNR_CPU_1V8,
+  MB_SNR_PCH_1V8,
+  MB_SNR_CPU0_PVPP_ABC,
+  MB_SNR_CPU0_PVPP_DEF,
+  MB_SNR_CPU0_PVTT_ABC,
+  MB_SNR_CPU0_PVTT_DEF,
+  MB_SNR_CPU1_PVPP_ABC,
+  MB_SNR_CPU1_PVPP_DEF,
+  MB_SNR_CPU1_PVTT_ABC,
+  MB_SNR_CPU1_PVTT_DEF,
+  MB_SNR_HSC_VIN,
+  MB_SNR_HSC_IOUT,
+  MB_SNR_HSC_PIN,
+  MB_SNR_HSC_TEMP,
 };
 
 // List of MB discrete sensors to be monitored
@@ -30,19 +58,48 @@ const uint8_t mb_discrete_sensor_list[] = {
 //  MB_SENSOR_PROCESSOR_FAIL,
 };
 
+//BMC ADC
 PAL_ADC_INFO adc_info_list[] = {
-  {ADC0, 15800, 2000},
-  {ADC1, 2870, 200},
-  {ADC2, 0, 1},
-  {ADC3, 0, 1},
-  {ADC4, 0, 1},
-  {ADC5, 15800, 2000},
-  {ADC6, 665, 2000},
+  {ADC0,  5360, 2000},
+  {ADC1,  5360, 2000},
+  {ADC2,  2870, 2000},
+  {ADC3,  2870, 2000},
+  {ADC5,  665, 2000},
+  {ADC6,  665, 2000},
+  {ADC7,  2000, 2200},
+  {ADC8,  2000, 2200},
+  {ADC9,  2000, 2200},
+  {ADC10, 2000, 2200},
+  {ADC11, 0, 1},
+  {ADC12, 0, 1},
+  {ADC13, 0, 1},
+  {ADC14, 0, 1},
+  {ADC_BAT, 200, 100},
 };
 
-PAL_TMP421_INFO tmp421_info_list[] = {
-  {TEMP_INLET, MB_INLET_TEMP_DEVICE},
-  {TEMP_OUTLET, MB_OUTLET_TEMP_DEVICE},
+//ADM1278
+PAL_ADM1278_INFO adm1278_info_list[] = {
+  {ADM1278_VOLTAGE, 19599, 0, 100},
+  {ADM1278_CURRENT, 800 * ADM1278_RSENSE, 20475, 10},
+  {ADM1278_POWER, 6123 * ADM1278_RSENSE, 0, 100},
+  {ADM1278_TEMP, 42, 31880, 10},
+};
+
+//HSC
+PAL_HSC_INFO hsc_info_list[] = {
+  {HSC_ID0, ADM1278_SLAVE_ADDR, adm1278_info_list},
+};
+
+//NM
+PAL_I2C_BUS_INFO nm_info_list[] = {
+  {NM_ID0, NM_IPMB_BUS_ID, NM_SLAVE_ADDR},
+};
+
+//TPM421
+PAL_I2C_BUS_INFO tmp421_info_list[] = {
+  {TEMP_INLET, I2C_BUS_19, 0x4C},
+  {TEMP_OUTLET_R, I2C_BUS_19, 0x4E},
+  {TEMP_OUTLET_L, I2C_BUS_19, 0x4F},
 };
 
 //{SensorName, ID, FUNCTION, PWR_STATUS, {UCR, UNR, UNC, LCR, LNR, LNC, Pos, Neg}
@@ -111,10 +168,10 @@ PAL_SENSOR_MAP mb_sensor_map[] = {
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x3D
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x3E
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x3F
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x40
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x41
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x42
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x43
+  {"MB_HSC_VIN",  HSC_ID0, read_hsc_vin,  true, {13.2, 0, 0, 10.8, 0, 0, 0, 0}}, //0x40
+  {"MB_HSC_IOUT", HSC_ID0, read_hsc_iout, true, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x41
+  {"MB_HSC_PIN",  HSC_ID0, read_hsc_pin,  true, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x42
+  {"MB_HSC_TEMP", HSC_ID0, read_hsc_temp, true, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x43 
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x44
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x45
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x46
@@ -207,9 +264,9 @@ PAL_SENSOR_MAP mb_sensor_map[] = {
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x9D
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x9E
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0x9F
-  {"MB_INLET_TEMP",  TEMP_INLET,  read_tmp421_val, true, {40, 0, 0, 20, 0, 0, 0, 0} }, //0xA0
-  {"MB_OUTLET_TEMP", TEMP_OUTLET, read_tmp421_val, true, {80, 0, 0, 20, 0, 0, 0, 0} }, //0xA1
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xA2
+  {"MB_INLET_TEMP",    TEMP_INLET,    read_temp421, true, {40, 0, 0, 20, 0, 0, 0, 0} }, //0xA0
+  {"MB_OUTLET_TEMP_R", TEMP_OUTLET_R, read_temp421, true, {80, 0, 0, 20, 0, 0, 0, 0} }, //0xA1
+  {"MB_OUTLET_TEMP_L", TEMP_OUTLET_L, read_temp421, true, {80, 0, 0, 20, 0, 0, 0, 0} }, //0xA2
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xA3
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xA4
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xA5
@@ -255,21 +312,21 @@ PAL_SENSOR_MAP mb_sensor_map[] = {
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xCD
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xCE
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xCF
-  {"MB_P12V",      ADC0, read_adc_val, false, {13.2, 0, 0, 11.8, 0, 0, 0, 0}},  //0xD0
-  {"MB_P3V3",      ADC1, read_adc_val, false, {3.60, 0, 0, 3.00, 0, 0, 0, 0}},  //0xD1
-  {"MB_PVNN_STBY", ADC2, read_adc_val, true,  {1.15, 0, 0, 0.94, 0, 0, 0, 0} }, //0xD2
-  {"MB_P1V05",     ADC3, read_adc_val, false, {1.15, 0, 0, 0.94, 0, 0, 0, 0}},  //0xD3
-  {"NULL",         ADC4, read_adc_val, true,  {0, 0, 0, 0, 0, 0, 0, 0}},        //0xD4
-  {"MB_P12V_STBY", ADC5, read_adc_val, true,  {13.2, 0, 0, 11.8, 0, 0, 0, 0}},  //0xD5
-  {"MB_P1V8",      ADC6, read_adc_val, false, {1.98, 0, 0, 1.62, 0, 0, 0, 0}},  //0xD6
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xD7
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xD8
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xD9
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDA
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDB
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDC
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDD
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDE
+  {"MB_P5V",       ADC0, read_adc_val, false, {5.50, 0, 0, 4.50, 0, 0, 0, 0}}, //0xD0
+  {"MB_P5V_STBY",  ADC1, read_adc_val, true,  {5.50, 0, 0, 4.50, 0, 0, 0, 0}}, //0xD1
+  {"MB_P3V3_STBY", ADC2, read_adc_val, true,  {3.63, 0, 0, 2.97, 0, 0, 0, 0}}, //0xD2
+  {"MB_P3V3",      ADC3, read_adc_val, false, {3.63, 0, 0, 2.97, 0, 0, 0, 0}}, //0xD3
+  {"MB_P3V_BAT",   ADC_BAT, read_battery_val, false, {3.3, 0, 0, 2.7, 0, 0, 0, 0}}, //0xD4
+  {"MB_CPU_1V8",   ADC5, read_adc_val, false, {1.98, 0, 0, 1.62, 0, 0, 0, 0}}, //0xD5
+  {"MB_PCH_1V8",   ADC6, read_adc_val, false, {1.98, 0, 0, 1.62, 0, 0, 0, 0}}, //0xD6
+  {"MB_CPU0_PVPP_ABC", ADC7,  read_adc_val, false, {2.84, 0, 0, 2.32, 0, 0, 0, 0}}, //0xD7
+  {"MB_CPU1_PVPP_ABC", ADC8,  read_adc_val, false, {2.84, 0, 0, 2.32, 0, 0, 0, 0}}, //0xD8
+  {"MB_CPU0_PVPP_DEF", ADC9,  read_adc_val, false, {2.84, 0, 0, 2.32, 0, 0, 0, 0}}, //0xD9
+  {"MB_CPU1_PVPP_DEF", ADC10, read_adc_val, false, {2.84, 0, 0, 2.32, 0, 0, 0, 0}}, //0xDA
+  {"MB_CPU0_PVTT_ABC", ADC11, read_adc_val, false, {0.677, 0, 0, 0.554, 0, 0, 0, 0}}, //0xDB
+  {"MB_CPU1_PVTT_ABC", ADC12, read_adc_val, false, {0.677, 0, 0, 0.554, 0, 0, 0, 0}}, //0xDC
+  {"MB_CPU0_PVTT_DEF", ADC13, read_adc_val, false, {0.677, 0, 0, 0.554, 0, 0, 0, 0}}, //0xDD
+  {"MB_CPU1_PVTT_DEF", ADC14, read_adc_val, false, {0.677, 0, 0, 0.554, 0, 0, 0, 0}}, //0xDE
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xDF
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xE0
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, //0xE1
@@ -347,21 +404,23 @@ read_device_float(const char *device, float *value) {
   FILE *fp;
   int rc;
   char tmp[10];
+  char cmd[MAX_DEVICE_NAME_SIZE];
 
-  fp = fopen(device, "r");
+  snprintf(cmd, MAX_DEVICE_NAME_SIZE, "cat %s", device);
+  fp = popen(cmd, "r");
   if (!fp) {
     int err = errno;
 #ifdef DEBUG
-    syslog(LOG_INFO, "failed to open device %s", device);
+    syslog(LOG_WARNING, "failed to open device %s", device);
 #endif
     return err;
   }
   rc = fscanf(fp, "%s", tmp);
-  fclose(fp);
+  pclose(fp);
 
   if (rc != 1) {
 #ifdef DEBUG
-    syslog(LOG_INFO, "failed to read device %s", device);
+    syslog(LOG_WARNING, "failed to read device %s", device);
 #endif
     return ENOENT;
   }
@@ -378,24 +437,302 @@ Read adc voltage sensor value.
 ============================================*/
 static int
 read_adc_val(uint8_t adc_id, float *value) {
-  PAL_ADC_INFO info=adc_info_list[adc_id];
-  char full_name[MAX_DEVICE_NAME_SIZE];
+  PAL_ADC_INFO info=adc_info_list[adc_id-1];
+  char path[MAX_DEVICE_NAME_SIZE];
   int ret=0;
 
-  snprintf(full_name, MAX_DEVICE_NAME_SIZE, MB_ADC_VOLTAGE_DEVICE, adc_id+1);
+  snprintf(path, MAX_DEVICE_NAME_SIZE, MB_ADC_VOLTAGE_DEVICE, adc_id);
+  
 #ifdef DEBUG 
-  syslog(LOG_WARNING, "%s %s\n", __func__, full_name);
+  syslog(LOG_DEBUG, "%s %s\n", __func__, path);
 #endif  
-  ret = read_device_float(full_name, value);
+  ret = read_device_float(path, value);
   if (ret != 0) {
     return ret;
   }
 
   *value = *value / 1000 * ((float)info.r1 + (float)info.r2) / (float)info.r2 ;
 #ifdef DEBUG  
-  syslog(LOG_WARNING, "%s r1=%d r2=%d value=%f\n", __func__, info.r1, info.r2, *value );
+  syslog(LOG_DEBUG, "%s r1=%d r2=%d value=%f\n", __func__, info.r1, info.r2, *value );
 #endif
   return 0;
+}
+
+static int
+read_battery_val(uint8_t adc_id, float *value) {
+  PAL_ADC_INFO info=adc_info_list[adc_id-1];
+  char path[MAX_DEVICE_NAME_SIZE] = MB_ADC_BAT_VOLTAGE_DEVICE;
+  int ret=0;
+
+  gpio_desc_t *gp_batt = gpio_open_by_shadow(GPIO_P3V_BAT_SCALED_EN);
+  if (!gp_batt) {
+    return -1;
+  }
+
+  if(gpio_set_direction(gp_batt, GPIO_DIRECTION_OUT)) {
+    goto bail;
+  }
+
+  if (gpio_set_value(gp_batt, GPIO_VALUE_HIGH)) {
+    goto bail;
+  }
+
+#ifdef DEBUG 
+  syslog(LOG_DEBUG, "%s %s\n", __func__, path);
+#endif  
+  msleep(10);
+  ret = read_device_float(path, value);
+  if (ret != 0) {
+    goto bail;
+  }
+
+  *value = *value / 1000 * ((float)info.r1 + (float)info.r2) / (float)info.r2 ;
+#ifdef DEBUG  
+  syslog(LOG_DEBUG, "%s r1=%d r2=%d value=%f\n", __func__, info.r1, info.r2, *value );
+#endif
+
+  if (gpio_set_value(gp_batt, GPIO_VALUE_LOW)) {
+    goto bail;
+  }
+
+  bail:
+    gpio_close(gp_batt);
+    return ret;
+}    
+static int
+get_nm_rw_info(uint8_t nm_id, uint8_t* nm_bus, uint8_t* nm_addr, uint16_t* bmc_addr) {
+  int ret=0;
+
+  *nm_bus= nm_info_list[nm_id].bus;
+  *nm_addr= nm_info_list[nm_id].slv_addr;
+  ret = pal_get_bmc_ipmb_slave_addr(bmc_addr, nm_info_list[nm_id].bus);
+  if (ret != 0) {
+    return ret;
+  }
+ 
+  return 0;
+}
+
+static void
+get_adm1278_info(uint8_t hsc_id, uint8_t type, float* m, float* b, float* r) {
+
+ *m = hsc_info_list[hsc_id].info[type].m;
+ *b = hsc_info_list[hsc_id].info[type].b;
+ *r = hsc_info_list[hsc_id].info[type].r;
+  
+ return;   
+}
+
+//Sensor HSC
+static int
+set_NM_hsc_pmon_config(uint8_t hsc_id, uint8_t value_l, uint8_t value_h) {
+  uint8_t data[2] = {0x00};
+  uint8_t rbuf[20] = {0x00};
+  uint8_t dev_addr = hsc_info_list[hsc_id].slv_addr;
+  NM_RW_INFO info;
+  int ret = 0;
+
+  get_nm_rw_info(NM_ID0, &info.bus, &info.nm_addr, &info.bmc_addr);
+  info.nm_cmd= PMBUS_PMON_CONFIG;
+
+  ret = cmd_NM_pmbus_read_word(info, dev_addr, rbuf);
+  if (ret != 0) {
+    ret = READING_NA;
+    return ret;
+  }
+
+  if (rbuf[6] == 0) {
+    data[0] = rbuf[10];   //PMON data low byte
+    data[1] = rbuf[11];   //PMON data high byte
+
+    data[0] |= value_l;
+    data[1] |= value_h;
+  } else {
+    ret = READING_NA;
+    return ret;
+  }
+  
+  ret = cmd_NM_pmbus_write_word(info, dev_addr, data);
+  if (ret != 0) {
+    return ret;
+  }
+
+  return 0;
+}
+
+static int
+enable_hsc_temp_monitor(uint8_t hsc_id) {
+  int ret=0;
+
+  ret = set_NM_hsc_pmon_config(hsc_id, 0x08, 0x00);
+  if (ret != 0) {
+    return ret;
+  }
+
+  return 0;
+}
+
+static int
+read_hsc_iout(uint8_t hsc_id, float *value) {
+  uint8_t rbuf[32] = {0x00};
+  uint8_t addr = hsc_info_list[hsc_id].slv_addr; 
+  float m, b, r; 
+  static int retry = 0;
+  int ret = 0;
+  NM_RW_INFO info;
+
+  get_nm_rw_info(NM_ID0, &info.bus, &info.nm_addr, &info.bmc_addr);
+  info.nm_cmd = PMBUS_READ_IOUT; 
+
+  ret = cmd_NM_pmbus_read_word(info, addr, rbuf);
+  if (ret != 0) {
+    retry++;
+    if (retry <= 3 ) {
+      ret = READING_SKIP;
+    }
+    ret = READING_NA;
+    return ret;
+  }
+
+  get_adm1278_info(hsc_id, ADM1278_CURRENT, &m, &b, &r);
+
+  if (rbuf[6] == 0) {
+    *value = ((float)(rbuf[11] << 8 | rbuf[10]) * r - b) / m;
+  #ifdef DEBUG  
+    syslog(LOG_DEBUG, "%s Iout value=%f\n", __func__, *value);
+  #endif  
+    retry = 0;
+  } else {
+  #ifdef DEBUG
+    syslog(LOG_DEBUG, "%s cc=%x\n", __func__, rbuf[6]);
+  #endif
+    ret = READING_NA;
+  }
+
+  return ret;
+}
+
+static int
+read_hsc_vin(uint8_t hsc_id, float *value) {
+  uint8_t rbuf[32] = {0x00};
+  uint8_t addr = hsc_info_list[hsc_id].slv_addr; 
+  float m, b, r; 
+  static int retry = 0;
+  int ret = 0;
+  NM_RW_INFO info;
+
+  get_nm_rw_info(NM_ID0, &info.bus, &info.nm_addr, &info.bmc_addr);
+  info.nm_cmd = PMBUS_READ_VIN;
+
+  ret = cmd_NM_pmbus_read_word(info, addr, rbuf);
+  if (ret != 0) {
+    retry++;
+    if (retry <= 3 ) {
+      ret = READING_SKIP;
+    }
+    ret = READING_NA;
+    return ret;
+  }
+
+  
+  get_adm1278_info(hsc_id, ADM1278_VOLTAGE, &m, &b, &r);
+  if (rbuf[6] == 0) {
+    *value = ((float)(rbuf[11] << 8 | rbuf[10]) * r - b) / m;
+  #ifdef DEBUG  
+    syslog(LOG_DEBUG, "%s Vin value=%f\n", __func__, *value);
+  #endif  
+    retry = 0;
+  } else {
+  #ifdef DEBUG
+    syslog(LOG_DEBUG, "%s cc=%x\n", __func__, rbuf[6]);
+  #endif
+    ret = READING_NA;
+  }
+
+  return ret;
+}
+
+static int
+read_hsc_pin(uint8_t hsc_id, float *value) {
+  uint8_t rbuf[32] = {0x00};
+  uint8_t addr = hsc_info_list[hsc_id].slv_addr; 
+  float m, b, r; 
+  static int retry = 0;
+  int ret = 0;
+  NM_RW_INFO info;
+
+  get_nm_rw_info(NM_ID0, &info.bus, &info.nm_addr, &info.bmc_addr);
+  info.nm_cmd = PMBUS_READ_PIN;
+
+  ret = cmd_NM_pmbus_read_word(info, addr, rbuf);
+  if (ret != 0) {
+    retry++;
+    if (retry <= 3 ) {
+      ret = READING_SKIP;
+    }
+    ret = READING_NA;
+    return ret;
+  }
+
+
+  get_adm1278_info(hsc_id, ADM1278_POWER, &m, &b, &r);
+
+  if (rbuf[6] == 0) {
+    *value = ((float)(rbuf[11] << 8 | rbuf[10]) * r - b) / m;
+  #ifdef DEBUG  
+    syslog(LOG_DEBUG, "%s Pin value=%f\n", __func__, *value);
+  #endif  
+    retry = 0;
+  } else {
+  #ifdef DEBUG
+    syslog(LOG_DEBUG, "%s cc=%x\n", __func__, rbuf[6]);
+  #endif
+    ret = READING_NA;
+  }
+
+  return ret;
+}
+
+static int
+read_hsc_temp(uint8_t hsc_id, float *value) {
+  uint8_t rbuf[32] = {0x00};
+  uint8_t addr = hsc_info_list[hsc_id].slv_addr; 
+  float m, b, r; 
+  static int retry = 0;
+  int ret = 0;
+  NM_RW_INFO info;
+
+  enable_hsc_temp_monitor(hsc_id);
+
+  get_nm_rw_info(NM_ID0, &info.bus, &info.nm_addr, &info.bmc_addr);
+  info.nm_cmd = PMBUS_READ_TEMP1;
+
+  ret = cmd_NM_pmbus_read_word(info, addr, rbuf);
+  if (ret != 0) {
+    retry++;
+    if (retry <= 3 ) {
+      ret = READING_SKIP;
+    }
+    ret = READING_NA;
+    return ret;
+  }
+
+  get_adm1278_info(hsc_id, ADM1278_TEMP, &m, &b, &r);
+
+  if (rbuf[6] == 0) {
+    *value = ((float)(rbuf[11] << 8 | rbuf[10]) * r - b) / m;
+  #ifdef DEBUG  
+    syslog(LOG_DEBUG, "%s Temp value=%f\n", __func__, *value);
+  #endif  
+    retry = 0;
+  } else {
+  #ifdef DEBUG
+    syslog(LOG_DEBUG, "%s cc=%x\n", __func__, rbuf[6]);
+  #endif
+    ret = READING_NA;
+  }
+
+  return ret;
 }
 
 /*==========================================
@@ -405,16 +742,18 @@ Interface: temp_id: temperature id
            return: error code
 ============================================*/
 static int
-read_tmp421_val(uint8_t temp_id, float *value) {
-  char full_name[MAX_DEVICE_NAME_SIZE];
+read_temp421(uint8_t temp_id, float *value) {
+  char path[MAX_DEVICE_NAME_SIZE];
   float tmp=0;
   int ret=0;
+  uint8_t bus = tmp421_info_list[temp_id].bus;
+  uint8_t addr = tmp421_info_list[temp_id].slv_addr;
   
-  snprintf(full_name, MAX_DEVICE_NAME_SIZE, tmp421_info_list[temp_id].device);
+  snprintf(path, MAX_DEVICE_NAME_SIZE, MB_TEMP_DEVICE, bus, bus, addr);
 #ifdef DEBUG 
-  syslog(LOG_WARNING, "%s %s\n", __func__, full_name);
+  syslog(LOG_WARNING, "%s %s\n", __func__, path);
 #endif  
-  ret = read_device_float(full_name, &tmp);
+  ret = read_device_float(path, &tmp);
   if (ret != 0) {
     return ret;
   }
@@ -441,21 +780,19 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
   switch(fru) {
   case FRU_MB:
     if (server_off) {
+      poweron_10s_flag = 0;
       if (mb_sensor_map[sensor_num].stby_read == true ) {
         ret = mb_sensor_map[sensor_num].read_sensor(id, (float*) value);  
       } else {
         ret = READING_NA;
       }
     } else {
-      if((poweron_10s_flag < 5) && ((sensor_num == MB_SNR_HSC_IN_VOLT) ||
-        (sensor_num == MB_SNR_HSC_OUT_CURR) || (sensor_num == MB_SNR_HSC_IN_POWER) ||
+      if((poweron_10s_flag < 5) && ((sensor_num == MB_SNR_HSC_VIN) ||
+        (sensor_num == MB_SNR_HSC_IOUT) || (sensor_num == MB_SNR_HSC_PIN) ||
         (sensor_num == MB_SNR_HSC_TEMP) ||
         (sensor_num == MB_SNR_FAN0_TACH) || (sensor_num == MB_SNR_FAN1_TACH))) {
   
-        if(sensor_num == MB_SNR_HSC_IN_POWER){
-          poweron_10s_flag++;
-        }
-  
+        poweron_10s_flag++;
         ret = READING_NA;
         break;
       }

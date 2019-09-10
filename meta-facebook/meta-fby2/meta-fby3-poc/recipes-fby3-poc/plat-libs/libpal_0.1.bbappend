@@ -21,4 +21,7 @@ SRC_URI += "file://pal.c \
             file://pal.h \
            "
 
+LDFLAGS += " -lbic "
+DEPENDS += " libbic "
+RDEPENDS_${PN} += " libobmc-i2c libbic "
 CFLAGS_prepend = " -DCONFIG_FBY3_POC "

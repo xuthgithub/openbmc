@@ -418,9 +418,9 @@ bic_get_dev_id(uint8_t slot_id, ipmi_dev_id_t *dev_id) {
 }
 
 int
-bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *ffi, uint8_t *meff, uint16_t *vendor_id) {
+bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *ffi, uint8_t *meff, uint16_t *vendor_id, uint8_t *major_ver, uint8_t *minor_ver) {
   uint8_t tbuf[5] = {0x15, 0xA0, 0x00}; // IANA ID
-  uint8_t rbuf[9] = {0x00};
+  uint8_t rbuf[11] = {0x00};
   uint8_t rlen = 0;
   int ret;
 
@@ -435,6 +435,8 @@ bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, u
   *ffi = rbuf[5];   // FFI_0 0:Storage 1:Accelerator
   *meff = rbuf[6];  // MEFF  0x35: M.2 22110 0xF0: Dual M.2
   *vendor_id = (rbuf[7] << 8 ) | rbuf[8]; // PCIe Vendor ID
+  *major_ver = rbuf[9];  //FW version Major Revision
+  *minor_ver = rbuf[10]; //FW version Minor Revision
 
   return ret;
 }
@@ -1420,7 +1422,8 @@ error_exit2:
     snprintf(cmd, MAX_CMD_LEN, "/usr/local/bin/bic-cached %d &", slot_id);   //retrieve SDR data after BIC FW update
     system(cmd);
     // add SDR update flag
-    bic_set_sdr_update_flag(slot_id, 1);
+    bic_set_sdr_update_flag(slot_id, 1); // for sensord reading value
+    bic_set_sdr_threshold_update_flag(slot_id, 1); // for sensord threshold
   }
 
   return ret;
@@ -2899,6 +2902,30 @@ bic_get_sdr_update_flag(uint8_t slot) {
   char key[MAX_KEY_LEN] = {0};
   char cvalue[MAX_VALUE_LEN] = {0};
   sprintf(key, "slot%u_sdr_update", slot);
+
+  ret = kv_get(key, cvalue,NULL,0);
+  if (ret) {
+    return 0;
+  }
+  return atoi(cvalue);
+}
+
+int
+bic_set_sdr_threshold_update_flag(uint8_t slot, uint8_t update) {
+  char key[MAX_KEY_LEN] = {0};
+  char str[MAX_VALUE_LEN] = {0};
+
+  snprintf(key,MAX_KEY_LEN, "slot%u_sdr_thresh_update", slot);
+  snprintf(str,MAX_VALUE_LEN, "%u",update);
+  return kv_set(key, str, 0, 0);
+}
+
+int
+bic_get_sdr_threshold_update_flag(uint8_t slot) {
+  int ret;
+  char key[MAX_KEY_LEN] = {0};
+  char cvalue[MAX_VALUE_LEN] = {0};
+  sprintf(key, "slot%u_sdr_thresh_update", slot);
 
   ret = kv_get(key, cvalue,NULL,0);
   if (ret) {

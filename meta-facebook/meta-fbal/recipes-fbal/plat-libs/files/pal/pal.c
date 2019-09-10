@@ -36,15 +36,7 @@
 #define FBAL_PLATFORM_NAME "angelslanding"
 #define LAST_KEY "last_key"
 
-#define GPIO_POWER "FM_BMC_PWRBTN_OUT_R_N"
-#define GPIO_POWER_GOOD "PWRGD_SYS_PWROK"
 #define GPIO_LOCATE_LED "FP_LOCATE_LED"
-#define GPIO_POWER_RESET "RST_BMC_RSTBTN_OUT_R_N"
-
-#define DELAY_GRACEFUL_SHUTDOWN 1
-#define DELAY_POWER_OFF 6
-#define DELAY_POWER_CYCLE 10
-
 
 const char pal_fru_list[] = "all, mb, nic0, nic1";
 const char pal_server_list[] = "mb";
@@ -287,76 +279,6 @@ pal_is_bmc_por(void) {
   return (por)?1:0;
 }
 
-// Power On the server in a given slot
-static int
-server_power_on(void) {
-  int ret;
-  gpio_desc_t *gdesc = NULL;
-
-  gdesc = gpio_open_by_shadow(GPIO_POWER);
-  if (gdesc == NULL)
-    return -1;
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_HIGH);
-  if (ret != 0)
-    goto error;
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_LOW);
-  if (ret != 0)
-    goto error;
-
-  sleep(1);
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_HIGH);
-  if (ret != 0)
-    goto error;
-
-  sleep(2);
-
-  system("/usr/bin/sv restart fscd >> /dev/null");
-
-error:
-  gpio_close(gdesc);
-  return ret;
-}
-
-// Power Off the server in given slot
-static int
-server_power_off(bool gs_flag) {
-  int ret;
-  gpio_desc_t *gdesc = NULL;
-
-  gdesc = gpio_open_by_shadow(GPIO_POWER);
-  if (gdesc == NULL)
-    return -1;
-
-  system("/usr/bin/sv stop fscd >> /dev/null");
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_HIGH);
-  if (ret != 0)
-    goto error;
-
-  sleep(1);
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_LOW);
-  if (ret != 0)
-    goto error;
-
-  if (gs_flag) {
-    sleep(DELAY_GRACEFUL_SHUTDOWN);
-  } else {
-    sleep(DELAY_POWER_OFF);
-  }
-
-  ret = gpio_set_value(gdesc, GPIO_VALUE_HIGH);
-  if (ret != 0)
-    goto error;
-
-error:
-  gpio_close(gdesc);
-  return ret;
-}
-
 int
 pal_get_platform_name(char *name) {
   strcpy(name, FBAL_PLATFORM_NAME);
@@ -383,144 +305,6 @@ pal_is_slot_server(uint8_t fru) {
   if (fru == FRU_MB)
     return 1;
   return 0;
-}
-
-int
-pal_get_server_power(uint8_t fru, uint8_t *status) {
-  int ret;
-  gpio_desc_t *gdesc = NULL;
-  gpio_value_t val;
-
-  if (fru != FRU_MB)
-    return -1;
-
-  gdesc = gpio_open_by_shadow(GPIO_POWER_GOOD);
-  if (gdesc == NULL)
-    return -1;
-
-  ret = gpio_get_value(gdesc, &val);
-  if (ret != 0)
-    goto error;
-
-  *status = (int)val;
-
-error:
-  gpio_close(gdesc);
-  return ret;
-}
-
-bool
-is_server_off(void) {
-  int ret;
-  uint8_t status;
-  ret = pal_get_server_power(FRU_MB, &status);
-  if (ret) {
-    return false;
-  }
-
-  return status == SERVER_POWER_OFF? true: false;
-}
-
-
-// Power Off, Power On, or Power Reset the server in given slot
-int
-pal_set_server_power(uint8_t fru, uint8_t cmd) {
-  uint8_t status;
-  bool gs_flag = false;
-  uint8_t ret;
-
-  if (pal_get_server_power(fru, &status) < 0) {
-    return -1;
-  }
-
-  switch(cmd) {
-    case SERVER_POWER_ON:
-      if (status == SERVER_POWER_ON)
-        return 1;
-      else
-        return server_power_on();
-      break;
-
-    case SERVER_POWER_OFF:
-      if (status == SERVER_POWER_OFF)
-        return 1;
-      else
-        return server_power_off(gs_flag);
-      break;
-
-    case SERVER_POWER_CYCLE:
-      if (status == SERVER_POWER_ON) {
-        if (server_power_off(gs_flag))
-          return -1;
-
-        sleep(DELAY_POWER_CYCLE);
-
-        return server_power_on();
-
-      } else if (status == SERVER_POWER_OFF) {
-
-        return (server_power_on());
-      }
-      break;
-
-    case SERVER_GRACEFUL_SHUTDOWN:
-      if (status == SERVER_POWER_OFF)
-        return 1;
-      gs_flag = true;
-      return server_power_off(gs_flag);
-      break;
-
-   case SERVER_POWER_RESET:
-      if (status == SERVER_POWER_ON) {
-        ret = pal_set_rst_btn(fru, 0);
-        if (ret < 0)
-          return ret;
-        msleep(100); //some server miss to detect a quick pulse, so delay 100ms between low high
-        ret = pal_set_rst_btn(fru, 1);
-        if (ret < 0)
-          return ret;
-      } else if (status == SERVER_POWER_OFF)
-        return -1;
-      break;
-
-    default:
-      return -1;
-  }
-
-  return 0;
-}
-
-int
-pal_sled_cycle(void) {
-  // Send command to HSC power cycle
-  system("i2cset -y 7 0x11 0xd9 c &> /dev/null");
-
-  return 0;
-}
-
-// Update the Reset button input to the server at given slot
-int
-pal_set_rst_btn(uint8_t slot, uint8_t status) {
-  int ret;
-  gpio_desc_t *gdesc = NULL;
-  gpio_value_t val;
-
-  if (slot != FRU_MB) {
-    return -1;
-  }
-
-  gdesc = gpio_open_by_shadow(GPIO_POWER_RESET);
-  if (gdesc == NULL)
-    return -1;
-
-  val = status? GPIO_VALUE_HIGH: GPIO_VALUE_LOW;
-  ret = gpio_set_value(gdesc, val);
-  if (ret != 0)
-    goto error;
-
-error:
-  gpio_close(gdesc);
-  return ret;
 }
 
 // Update the Identification LED for the given fru with the status
@@ -561,6 +345,14 @@ pal_get_fru_id(char *str, uint8_t *fru) {
     *fru = FRU_ALL;
   } else if (!strcmp(str, "mb")) {
     *fru = FRU_MB;
+  } else if (!strcmp(str, "pdb")) {
+    *fru = FRU_PDB;
+  } else if (!strcmp(str, "nic")) {
+    *fru = FRU_NIC0;
+  } else if (!strcmp(str, "ocpdbg")) {
+    *fru = FRU_DBG;
+  } else if (!strcmp(str, "bmc")) {
+    *fru = FRU_BMC;
   } else {
     syslog(LOG_WARNING, "pal_get_fru_id: Wrong fru#%s", str);
     return -1;
@@ -571,9 +363,21 @@ pal_get_fru_id(char *str, uint8_t *fru) {
 
 int
 pal_get_fru_name(uint8_t fru, char *name) {
-  switch(fru) {
+  switch (fru) {
     case FRU_MB:
       strcpy(name, "mb");
+      break;
+    case FRU_PDB:
+      strcpy(name, "pdb");
+      break;
+    case FRU_NIC0:
+      strcpy(name, "nic");
+      break;
+    case FRU_DBG:
+      strcpy(name, "ocpdbg");
+      break;
+    case FRU_BMC:
+      strcpy(name, "bmc");
       break;
     default:
       if (fru > MAX_NUM_FRUS)
@@ -581,44 +385,26 @@ pal_get_fru_name(uint8_t fru, char *name) {
       sprintf(name, "fru%d", fru);
       break;
   }
+
   return 0;
 }
 
-int
-pal_set_last_pwr_state(uint8_t fru, char *state) {
-
+void
+pal_dump_key_value(void) {
   int ret;
-  char key[MAX_KEY_LEN] = {0};
+  int i = 0;
+  char value[MAX_VALUE_LEN] = {0x0};
 
-  sprintf(key, "%s", "pwr_server_last_state");
-
-  ret = pal_set_key_value(key, state);
-  if (ret < 0) {
-#ifdef DEBUG
-    syslog(LOG_WARNING, "pal_set_last_pwr_state: pal_set_key_value failed for "
-        "fru %u", fru);
-#endif
+  while (strcmp(key_cfg[i].name, LAST_KEY)) {
+    printf("%s:", key_cfg[i].name);
+    if ((ret = kv_get(key_cfg[i].name, value, NULL, KV_FPERSIST)) < 0) {
+    printf("\n");
+  } else {
+    printf("%s\n",  value);
   }
-
-  return ret;
-}
-
-int
-pal_get_last_pwr_state(uint8_t fru, char *state) {
-  int ret;
-  char key[MAX_KEY_LEN] = {0};
-
-  sprintf(key, "%s", "pwr_server_last_state");
-
-  ret = pal_get_key_value(key, state);
-  if (ret < 0) {
-#ifdef DEBUG
-    syslog(LOG_WARNING, "pal_get_last_pwr_state: pal_get_key_value failed for "
-        "fru %u", fru);
-#endif
+    i++;
+    memset(value, 0, MAX_VALUE_LEN);
   }
-
-  return ret;
 }
 
 void
@@ -720,16 +506,20 @@ pal_is_fru_ready(uint8_t fru, uint8_t *status) {
 int
 pal_channel_to_bus(int channel) {
   switch (channel) {
-    case 0:
-      return 0; // USB (LCD Debug Board)
-    case 1:
-      return 5; // ME
-    case 2:
-      return 2; // Slave BMC
-    case 3:
-      return 6; // CM
-    case 9:
-      return 8; // Riser (Big Basin)
+    case IPMI_CHANNEL_0:
+      return I2C_BUS_0; // USB (LCD Debug Board)
+
+    case IPMI_CHANNEL_2:
+      return I2C_BUS_2; // Slave BMC
+
+    case IPMI_CHANNEL_6:
+      return I2C_BUS_5; // ME
+
+    case IPMI_CHANNEL_8:
+      return I2C_BUS_8; // CM
+
+    case IPMI_CHANNEL_9:
+      return I2C_BUS_6; // Riser
   }
 
   // Debug purpose, map to real bus number
@@ -810,3 +600,128 @@ pal_set_def_key_value() {
   return 0;
 }
 
+static int
+get_gpio_shadow_array(const char **shadows, int num, uint8_t *mask)
+{
+  int i;
+  *mask = 0;
+
+  for (i = 0; i < num; i++) {
+    int ret;
+    gpio_value_t value;
+    gpio_desc_t *gpio = gpio_open_by_shadow(shadows[i]);
+    if (!gpio) {
+      return -1;
+    }
+
+    ret = gpio_get_value(gpio, &value);
+    gpio_close(gpio);
+
+    if (ret != 0) {
+      return -1;
+    }
+    *mask |= (value == GPIO_VALUE_HIGH ? 1 : 0) << i;
+  }
+  return 0;
+}
+
+int
+pal_get_blade_id(uint8_t *id) {
+  static bool cached = false;
+  static uint8_t cached_id = 0;
+
+  if (!cached) {
+    const char *shadows[] = {
+      "FM_BLADE_ID_0",
+      "FM_BLADE_ID_1"
+    };
+    if (get_gpio_shadow_array(shadows, ARRAY_SIZE(shadows), &cached_id)) {
+      return -1;
+    }
+    cached = true;
+  }
+  *id = cached_id;
+  return 0;
+}
+
+int pal_get_bmc_ipmb_slave_addr(uint16_t* slave_addr, uint8_t bus_id)
+{
+  uint8_t val;
+  int ret;
+  static uint16_t addr=0;
+
+  if ((bus_id == I2C_BUS_1) || (bus_id == I2C_BUS_5)) {
+
+    if (addr == 0) {
+      ret = pal_get_blade_id (&val);
+      if (ret != 0) {
+        return -1;
+      }
+      addr = 0x1010 | val;
+      *slave_addr = addr;
+    } else {
+      *slave_addr = addr;
+    }
+  } else {
+    *slave_addr = 0x10;
+  }
+
+#ifdef DEBUG
+  syslog(LOG_DEBUG,"%s BMC Slave Addr=%d bus=%d", __func__, *slave_addr, bus_id);
+#endif
+  return 0;
+}
+
+int
+pal_ipmb_processing(int bus, void *buf, uint16_t size) {
+  char key[MAX_KEY_LEN];
+  char value[MAX_VALUE_LEN];
+  struct timespec ts;
+  static time_t last_time = 0;
+
+  switch (bus) {
+    case I2C_BUS_0:
+      if (((uint8_t *)buf)[0] == 0x20) {
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        if (ts.tv_sec >= (last_time + 5)) {
+          last_time = ts.tv_sec;
+          ts.tv_sec += 20;
+
+          sprintf(key, "ocpdbg_lcd");
+          sprintf(value, "%ld", ts.tv_sec);
+          if (kv_set(key, value, 0, 0) < 0) {
+            return -1;
+          }
+        }
+      }
+      break;
+  }
+
+  return 0;
+}
+
+int
+pal_is_mcu_ready(uint8_t bus) {
+  char key[MAX_KEY_LEN];
+  char value[MAX_VALUE_LEN] = {0};
+  struct timespec ts;
+
+  switch (bus) {
+    case I2C_BUS_0:
+      sprintf(key, "ocpdbg_lcd");
+      if (kv_get(key, value, NULL, 0)) {
+        return false;
+      }
+
+      clock_gettime(CLOCK_MONOTONIC, &ts);
+      if (strtoul(value, NULL, 10) > ts.tv_sec) {
+         return true;
+      }
+      break;
+
+    case I2C_BUS_8:
+      return true;
+  }
+
+  return false;
+}

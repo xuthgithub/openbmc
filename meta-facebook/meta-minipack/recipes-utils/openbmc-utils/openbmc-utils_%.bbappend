@@ -18,11 +18,13 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI += "file://board-utils.sh \
+            file://boot_info.sh \
             file://cpld_ver.sh \
             file://disable_watchdog.sh \
             file://eth0_mac_fixup.sh \
             file://fcmcpld_update.sh \
             file://fpga_ver.sh \
+            file://feutil \
             file://pdbcpld_update.sh \
             file://peutil \
             file://pimcpld_update.sh \
@@ -51,10 +53,12 @@ SRC_URI += "file://board-utils.sh \
 
 OPENBMC_UTILS_FILES += " \
     board-utils.sh \
+    boot_info.sh \
     cpld_ver.sh \
     disable_watchdog.sh \
     fcmcpld_update.sh \
     fpga_ver.sh \
+    feutil \
     presence_util.sh \
     peutil \
     pdbcpld_update.sh \

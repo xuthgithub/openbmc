@@ -173,6 +173,7 @@ enum {
   IIO_ERR = 0x43,
   SMN_ERR = 0x44, //FBND
   USB_ERR = 0x45, //FBND
+  PSB_ERR = 0x46, //FBND
   MEMORY_ECC_ERR = 0X63,
   MEMORY_ERR_LOG_DIS = 0X87,
   PROCHOT_EXT = 0X51,
@@ -193,6 +194,12 @@ enum {
   PWR_THRESH_EVT = 0x3B,
   MSMI = 0xE7,
   HPR_WARNING = 0xC5,
+};
+
+enum {
+  MEMORY_TRAINING_ERR = 0x0,
+  MEMORY_CORRECTABLE_ERR = 0x1,
+  MEMORY_UNCORRECTABLE_ERR = 0x2,
 };
 
 // Helper function needed by some of pal functions
@@ -367,9 +374,19 @@ char *pal_get_pwn_list(void);
 char *pal_get_tach_list(void);
 int pal_get_pwm_cnt(void);
 int pal_get_tach_cnt(void);
-int pal_get_nic_fru_id(void);
-
 int pal_set_time_sync(uint8_t *req_data, uint8_t req_len);
+int pal_get_nic_fru_id(void);
+int pal_get_bmc_ipmb_slave_addr(uint16_t *slave_addr, uint8_t bus_id);
+int pal_is_mcu_ready(uint8_t bus);
+int pal_wait_mcu_ready2update(uint8_t bus);
+int pal_set_time_sync(uint8_t *req_data, uint8_t req_len);
+int pal_set_sdr_update_flag(uint8_t slot, uint8_t update);
+int pal_get_sdr_update_flag(uint8_t slot);
+int pal_parse_mem_mapping_string(uint8_t channel, bool *support_mem_mapping, char *error_log);
+int pal_check_fw_image(uint8_t fru, const char *comp, const char *path);
+int pal_fw_update_prepare(uint8_t fru, const char *comp);
+int pal_fw_update_finished(uint8_t fru, const char *comp, int status);
+bool pal_is_modify_sel_time(uint8_t *sel, int size);
 #ifdef __cplusplus
 }
 #endif

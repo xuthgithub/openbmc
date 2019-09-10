@@ -424,7 +424,7 @@ int bic_get_dev_id(uint8_t slot_id, ipmi_dev_id_t *id);
 int bic_get_bic_config(uint8_t slot_id, bic_config_t *cfg);
 int bic_set_bic_config(uint8_t slot_id, bic_config_t *cfg);
 
-int bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *ffi, uint8_t *meff, uint16_t *vendor_id);
+int bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *ffi, uint8_t *meff, uint16_t *vendor_id, uint8_t *major_ver, uint8_t *minor_ver);
 int bic_set_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t status);
 int bic_get_gpio(uint8_t slot_id, bic_gpio_t *gpio);
 int bic_get_gpio_status(uint8_t slot_id, uint8_t pin, uint8_t *status);
@@ -483,6 +483,8 @@ int bic_send_jtag_instruction(uint8_t slot_id, uint8_t dev_id, uint8_t *rbuf, ui
 int bic_get_debug_mode(uint8_t slot_id, uint8_t *debug_mode);
 int bic_set_sdr_update_flag(uint8_t slot, uint8_t update);
 int bic_get_sdr_update_flag(uint8_t slot);
+int bic_set_sdr_threshold_update_flag(uint8_t slot, uint8_t update);
+int bic_get_sdr_threshold_update_flag(uint8_t slot);
 
 #ifdef __cplusplus
 } // extern "C"
