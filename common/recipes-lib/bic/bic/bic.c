@@ -2,7 +2,7 @@
  *
  * Copyright 2015-present Facebook. All Rights Reserved.
  *
- * This file contains code to support IPMI2.0 Specificaton available @
+ * This file contains code to support IPMI2.0 Specification available @
  * http://www.intel.com/content/www/us/en/servers/ipmi/ipmi-specifications.html
  *
  * This program is free software; you can redistribute it and/or modify
@@ -173,33 +173,6 @@ i2c_io(int fd, uint8_t *tbuf, uint8_t tcount, uint8_t *rbuf, uint8_t rcount) {
 }
 
 static int
-write_device(const char *device, const char *value) {
-  FILE *fp;
-  int rc;
-
-  fp = fopen(device, "w");
-  if (!fp) {
-    int err = errno;
-#ifdef DEBUG
-    syslog(LOG_INFO, "failed to open device for write %s", device);
-#endif
-    return err;
-  }
-
-  rc = fputs(value, fp);
-  fclose(fp);
-
-  if (rc < 0) {
-#ifdef DEBUG
-    syslog(LOG_INFO, "failed to write device %s", device);
-#endif
-    return ENOENT;
-  } else {
-    return 0;
-  }
-}
-
-static int
 read_device(const char *device, int *value) {
   FILE *fp;
   int rc;
@@ -265,21 +238,6 @@ bic_is_slot_12v_on(uint8_t slot_id) {
   } else {
     return 1;
   }
-}
-
-int bic_set_slot_12v(uint8_t slot_id, uint8_t status)
-{
-  char path[64] = {0};
-  const char *val = status ? "1" : "0";
-
-  if (slot_id < 1 || slot_id > 4) {
-    return -1;
-  }
-  sprintf(path, GPIO_VAL, gpio_12v[slot_id]);
-  if (write_device(path, val)) {
-    return -1;
-  }
-  return 0;
 }
 
 int
