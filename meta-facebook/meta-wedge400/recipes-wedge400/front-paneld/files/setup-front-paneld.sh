@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright 2018-present Facebook. All Rights Reserved.
+# Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -17,6 +17,15 @@
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
 #
-/usr/local/bin/us_console.sh connect
-exec /usr/local/bin/mTerm_server wedge /dev/ttyS4
+### BEGIN INIT INFO
+# Provides:          setup-front-paneld
+# Required-Start:
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Start front panel control daemon
+### END INIT INFO
 
+echo -n "Setup Front Panel Daemon.."
+runsv /etc/sv/front-paneld > /dev/null 2>&1 &
+echo "done."

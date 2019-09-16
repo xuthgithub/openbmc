@@ -1,3 +1,4 @@
+#
 # Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
@@ -14,31 +15,26 @@
 # Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
+#
 
-SUMMARY = "Wedge400 GPIO Pin Library"
-DESCRIPTION = "library for all gpio pins in wedge400"
+SUMMARY = "Firmware Utility"
+DESCRIPTION = "Util for printing or updating firmware images"
 SECTION = "base"
 PR = "r1"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://wedge400_gpio.c;beginline=6;endline=18;md5=070623b19848af757119827e6828c575"
+LIC_FILES_CHKSUM = "file://fw-util.c;beginline=5;endline=16;md5=69348da7e13c557a246cf7e5b163ea27"
 
-
-SRC_URI = "file://wedge400_gpio \
+SRC_URI = "file://fw-util \
           "
 
-DEPENDS += " liblog libbic "
-LDFLAGS += " -llog -lbic"
-
-S = "${WORKDIR}/wedge400_gpio"
+S = "${WORKDIR}/fw-util"
 
 do_install() {
-    install -d ${D}${libdir}
-    install -m 0644 libwedge400_gpio.so ${D}${libdir}/libwedge400_gpio.so
-
-    install -d ${D}${includedir}
-    install -d ${D}${includedir}/facebook
-    install -m 0644 wedge400_gpio.h ${D}${includedir}/facebook/wedge400_gpio.h
+    install -d ${D}${bindir}
+    install -m 0755 fw-util ${D}${bindir}/fw-util
 }
 
-FILES_${PN} = "${libdir}/libwedge400_gpio.so"
-FILES_${PN}-dev = "${includedir}/facebook/wedge400_gpio.h"
+DEPENDS += "libbic libpal libipmb libipmi"
+RDEPENDS_${PN} += "libbic libpal libipmb libipmi"
+
+FILES_${PN} = "${bindir}"

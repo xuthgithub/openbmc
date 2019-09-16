@@ -1,3 +1,4 @@
+#
 # Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
@@ -9,20 +10,20 @@
 # FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 #
+# You should have received a copy of the GNU General Public License
+# along with this program in a file named COPYING; if not, write to the
+# Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor,
+# Boston, MA 02110-1301 USA
+#
+all: front-paneld
 
-obj-m := max6615.o ltc4282.o
+CFLAGS += -Wall -Werror
 
-ccflags-y += -I$(KERNEL_EXTRA_HEADER_PATH)
+front-paneld: front-paneld.c
+	$(CC) $(CFLAGS) -std=gnu99 -pthread -lpal -lbic -o $@ $^ $(LDFLAGS)
 
-SRC := $(shell pwd)
-
-all:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC)
-
-modules_install:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install
+.PHONY: clean
 
 clean:
-	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
-	rm -f Module.markers Module.symvers modules.order
-	rm -rf .tmp_versions Modules.symvers
+	rm -rf *.o front-paneld
