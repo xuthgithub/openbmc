@@ -1,4 +1,4 @@
-# Copyright 2018-present Facebook. All Rights Reserved.
+# Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -15,18 +15,14 @@
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+all: bic-cached
 
-SRC_URI += "file://mcu_fw.h \
-            file://mcu_fw.cpp \
-            file://cm.cpp \
-            file://bios.h \
-            file://bios.cpp \
-            file://platform.cpp \
-           "
+CFLAGS += -Wall -Werror
 
-SRC_URI_remove = "file://fscd.cpp"
+bic-cached: bic-cached.c
+	$(CC) $(CFLAGS) -std=c99 -o $@ $^ $(LDFLAGS)
 
-DEPENDS += "libmcu"
-RDEPENDS_${PN} += "libmcu"
-LDFLAGS += "-lmcu"
+.PHONY: clean
+
+clean:
+	rm -rf *.o bic-cached

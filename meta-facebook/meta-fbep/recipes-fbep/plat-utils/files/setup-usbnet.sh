@@ -1,4 +1,6 @@
-# Copyright 2018-present Facebook. All Rights Reserved.
+#!/bin/sh
+#
+# Copyright 2014-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -14,19 +16,6 @@
 # Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
+#
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
-
-SRC_URI += "file://mcu_fw.h \
-            file://mcu_fw.cpp \
-            file://cm.cpp \
-            file://bios.h \
-            file://bios.cpp \
-            file://platform.cpp \
-           "
-
-SRC_URI_remove = "file://fscd.cpp"
-
-DEPENDS += "libmcu"
-RDEPENDS_${PN} += "libmcu"
-LDFLAGS += "-lmcu"
+modprobe g_ether host_addr=02:00:00:00:00:02 dev_addr=02:00:00:00:00:01

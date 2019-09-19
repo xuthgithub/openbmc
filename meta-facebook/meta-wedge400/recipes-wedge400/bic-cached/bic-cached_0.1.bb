@@ -1,4 +1,4 @@
-# Copyright 2015-present Facebook. All Rights Reserved.
+# Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -15,44 +15,46 @@
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
 
-SUMMARY = "GPIO Monitoring Daemon"
-DESCRIPTION = "Daemon for monitoring the gpio signals"
+SUMMARY = "Bridge IC Cache Daemon"
+DESCRIPTION = "Daemon to provide Bridge IC Cache information."
 SECTION = "base"
 PR = "r1"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://gpiod.c;beginline=4;endline=16;md5=b395943ba8a0717a83e62ca123a8d238"
+LIC_FILES_CHKSUM = "file://bic-cached.c;beginline=5;endline=17;md5=da35978751a9d71b73679307c4d296ec"
 
 SRC_URI = "file://Makefile \
-           file://gpiod.c \
-           file://setup-gpiod.sh \
+           file://setup-bic-cached.sh \
+           file://bic-cached.c \
           "
 
 S = "${WORKDIR}"
 
-binfiles = "gpiod \
-           "
-DEPENDS += "libpal libgpio-ctrl update-rc.d-native libnm"
-RDEPENDS_${PN} += "libpal libnm libgpio-ctrl"
-LDFLAGS += "-pthread -lpal -lnm -lgpio-ctrl"
+DEPENDS += " liblog libbic libpal update-rc.d-native "
+RDEPENDS_${PN} += " liblog libbic libpal "
+LDFLAGS = "-llog -lbic -lpal"
 
-pkgdir = "gpiod"
+binfiles = "bic-cached"
+
+pkgdir = "bic-cached"
 
 do_install() {
   dst="${D}/usr/local/fbpackages/${pkgdir}"
   bin="${D}/usr/local/bin"
   install -d $dst
   install -d $bin
-  for f in ${binfiles}; do
-    install -m 755 $f ${dst}/$f
-    ln -snf ../fbpackages/${pkgdir}/$f ${bin}/$f
-  done
+  install -m 755 bic-cached ${dst}/bic-cached
+  ln -snf ../fbpackages/${pkgdir}/bic-cached ${bin}/bic-cached
   install -d ${D}${sysconfdir}/init.d
   install -d ${D}${sysconfdir}/rcS.d
-  install -m 755 setup-gpiod.sh ${D}${sysconfdir}/init.d/setup-gpiod.sh
-  update-rc.d -r ${D} setup-gpiod.sh start 91 5 .
+  install -m 755 setup-bic-cached.sh ${D}${sysconfdir}/init.d/setup-bic-cached.sh
+  update-rc.d -r ${D} setup-bic-cached.sh start 66 5 .
 }
 
 FBPACKAGEDIR = "${prefix}/local/fbpackages"
 
-FILES_${PN} = "${FBPACKAGEDIR}/gpiod ${prefix}/local/bin ${sysconfdir} "
+FILES_${PN} = "${FBPACKAGEDIR}/bic-cached ${prefix}/local/bin ${sysconfdir} "
 
+# Inhibit complaints about .debug directories:
+
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+INHIBIT_PACKAGE_STRIP = "1"

@@ -1,4 +1,6 @@
-# Copyright 2018-present Facebook. All Rights Reserved.
+#!/bin/sh
+#
+# Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -14,19 +16,21 @@
 # Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
+#
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+### BEGIN INIT INFO
+# Provides:          setup-bic-cached
+# Required-Start:
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Set Cachcing for Bridge IC info
+### END INIT INFO
 
-SRC_URI += "file://mcu_fw.h \
-            file://mcu_fw.cpp \
-            file://cm.cpp \
-            file://bios.h \
-            file://bios.cpp \
-            file://platform.cpp \
-           "
+. /usr/local/fbpackages/utils/ast-functions
 
-SRC_URI_remove = "file://fscd.cpp"
+echo -n "Setup Caching for Bridge IC info.."
 
-DEPENDS += "libmcu"
-RDEPENDS_${PN} += "libmcu"
-LDFLAGS += "-lmcu"
+/usr/local/bin/bic-cached 0 > /dev/null 2>&1 &
+
+echo "done."

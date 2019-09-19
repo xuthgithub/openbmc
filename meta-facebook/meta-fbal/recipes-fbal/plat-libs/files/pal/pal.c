@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <openbmc/kv.h>
 #include <openbmc/libgpio.h>
 #include "pal.h"
@@ -37,6 +38,7 @@
 #define LAST_KEY "last_key"
 
 #define GPIO_LOCATE_LED "FP_LOCATE_LED"
+#define GPIO_FAULT_LED "FP_FAULT_LED_N"
 
 const char pal_fru_list[] = "all, mb, nic0, nic1";
 const char pal_server_list[] = "mb";
@@ -123,8 +125,8 @@ pal_set_key_value(char *key, char *value) {
   return kv_set(key, value, 0, KV_FPERSIST);
 }
 
-static int fw_getenv(char *key, char *value)
-{
+static int 
+fw_getenv(char *key, char *value) {
   char cmd[MAX_KEY_LEN + 32] = {0};
   char *p;
   FILE *fp;
@@ -148,8 +150,8 @@ static int fw_getenv(char *key, char *value)
   return 0;
 }
 
-static void fw_setenv(char *key, char *value)
-{
+static void 
+fw_setenv(char *key, char *value) {
   char old_value[MAX_VALUE_LEN] = {0};
   if (fw_getenv(key, old_value) != 0 ||
       strcmp(old_value, value) != 0) {
@@ -184,8 +186,7 @@ pal_is_fw_update_ongoing(uint8_t fruid) {
 }
 
 static int
-key_func_por_policy (int event, void *arg)
-{
+key_func_por_policy (int event, void *arg) {
   char value[MAX_VALUE_LEN] = {0};
 
   switch (event) {
@@ -210,8 +211,7 @@ key_func_por_policy (int event, void *arg)
 }
 
 static int
-key_func_lps (int event, void *arg)
-{
+key_func_lps (int event, void *arg) {
   char value[MAX_VALUE_LEN] = {0};
 
   switch (event) {
@@ -230,8 +230,7 @@ key_func_lps (int event, void *arg)
 }
 
 static int
-key_func_ntp (int event, void *arg)
-{
+key_func_ntp (int event, void *arg) {
   char cmd[MAX_VALUE_LEN] = {0};
   char ntp_server_new[MAX_VALUE_LEN] = {0};
   char ntp_server_old[MAX_VALUE_LEN] = {0};
@@ -326,17 +325,32 @@ pal_set_id_led(uint8_t fru, uint8_t status) {
   if (ret != 0)
     goto error;
 
-error:
-  gpio_close(gdesc);
-  return ret;
+  error:
+    gpio_close(gdesc);
+    return ret;
 }
 
-// Update the LED for the given slot with the status
 int
-pal_set_led(uint8_t fru, uint8_t status) {
+pal_set_fault_led(uint8_t fru, uint8_t status) {
+  int ret;
+  gpio_desc_t *gdesc = NULL;
+  gpio_value_t val;
 
-// Controlled by pal_set_id_led()
-  return 0;
+  if (fru != FRU_MB)
+    return -1;
+
+  gdesc = gpio_open_by_shadow(GPIO_FAULT_LED);
+  if (gdesc == NULL)
+    return -1;
+
+  val = status? GPIO_VALUE_HIGH: GPIO_VALUE_LOW;
+  ret = gpio_set_value(gdesc, val);
+  if (ret != 0)
+    goto error;
+
+  error:
+    gpio_close(gdesc);
+    return ret;
 }
 
 int
@@ -438,8 +452,7 @@ pal_get_chassis_status(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8
 }
 
 void
-pal_update_ts_sled()
-{
+pal_update_ts_sled() {
   char key[MAX_KEY_LEN] = {0};
   char tstr[MAX_VALUE_LEN] = {0};
   struct timespec ts;
@@ -451,7 +464,6 @@ pal_update_ts_sled()
 
   pal_set_key_value(key, tstr);
 }
-
 
 int
 pal_get_fruid_path(uint8_t fru, char *path) {
@@ -601,8 +613,7 @@ pal_set_def_key_value() {
 }
 
 static int
-get_gpio_shadow_array(const char **shadows, int num, uint8_t *mask)
-{
+get_gpio_shadow_array(const char **shadows, int num, uint8_t *mask) {
   int i;
   *mask = 0;
 
@@ -644,8 +655,8 @@ pal_get_blade_id(uint8_t *id) {
   return 0;
 }
 
-int pal_get_bmc_ipmb_slave_addr(uint16_t* slave_addr, uint8_t bus_id)
-{
+int 
+pal_get_bmc_ipmb_slave_addr(uint16_t* slave_addr, uint8_t bus_id) {
   uint8_t val;
   int ret;
   static uint16_t addr=0;
@@ -724,4 +735,178 @@ pal_is_mcu_ready(uint8_t bus) {
   }
 
   return false;
+}
+
+int
+pal_set_sysfw_ver(uint8_t slot, uint8_t *ver) {
+  int i;
+  char str[MAX_VALUE_LEN] = {0};
+  char tstr[8] = {0};
+
+  for (i = 0; i < SIZE_SYSFW_VER; i++) {
+    sprintf(tstr, "%02x", ver[i]);
+    strcat(str, tstr);
+  }
+
+  return pal_set_key_value("sysfw_ver_server", str);
+}
+
+int
+pal_get_sysfw_ver(uint8_t slot, uint8_t *ver) {
+  int ret;
+  int i, j;
+  char str[MAX_VALUE_LEN] = {0};
+  char tstr[8] = {0};
+
+  ret = pal_get_key_value("sysfw_ver_server", str);
+  if (ret) {
+    return ret;
+  }
+
+  for (i = 0, j = 0; i < 2*SIZE_SYSFW_VER; i += 2) {
+    sprintf(tstr, "%c%c", str[i], str[i+1]);
+    ver[j++] = strtol(tstr, NULL, 16);
+  }
+  return 0;
+}
+
+int
+pal_uart_select (uint32_t base, uint8_t offset, int option, uint32_t para) {
+  uint32_t mmap_fd;
+  uint32_t ctrl;
+  void *reg_base;
+  void *reg_offset;
+
+  mmap_fd = open("/dev/mem", O_RDWR | O_SYNC );
+  if (mmap_fd < 0) {
+    return -1;
+  }
+
+  reg_base = mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, base);
+  reg_offset = (char*) reg_base + offset;
+  ctrl = *(volatile uint32_t*) reg_offset;
+
+  switch(option) {
+    case UARTSW_BY_BMC:                //UART Switch control by bmc
+      ctrl &= 0x00ffffff;
+      break;
+    case UARTSW_BY_DEBUG:           //UART Switch control by debug card
+      ctrl |= 0x01000000;
+      break;
+    case SET_SEVEN_SEGMENT:      //set channel on the seven segment display
+      ctrl &= 0x00ffffff;
+      ctrl |= para;
+      break;
+    default:
+      syslog(LOG_WARNING, "pal_mmap: unknown option");
+      break;
+  }
+  *(volatile uint32_t*) reg_offset = ctrl;
+
+  munmap(reg_base, PAGE_SIZE);
+  close(mmap_fd);
+
+  return 0;
+}
+
+int
+pal_fw_update_prepare(uint8_t fru, const char *comp) {
+  int ret = 0, retry = 3;
+  uint8_t status;
+  gpio_desc_t *desc;
+
+  if ((fru == FRU_MB) && !strcmp(comp, "bios")) {
+    pal_set_server_power(FRU_MB, SERVER_POWER_OFF);
+    while (retry > 0) {
+      if (!pal_get_server_power(FRU_MB, &status) && (status == SERVER_POWER_OFF)) {
+        break;
+      }
+      if ((--retry) > 0) {
+        sleep(1);
+      }
+    }
+    if (retry <= 0) {
+      printf("Failed to Power Off Server. Stopping the update!\n");
+      return -1;
+    }
+
+    system("/usr/local/bin/me-util 0xB8 0xDF 0x57 0x01 0x00 0x01 > /dev/null");
+    sleep(1);
+
+    ret = -1;
+    desc = gpio_open_by_shadow("FM_BIOS_SPI_BMC_CTRL");
+    if (desc) {
+      if (!gpio_set_direction(desc, GPIO_DIRECTION_OUT) && !gpio_set_value(desc, GPIO_VALUE_HIGH)) {
+        ret = 0;
+      } else {
+        printf("Failed to switch BIOS ROM to BMC\n");
+      }
+      gpio_close(desc);
+    } else {
+      printf("Failed to open SPI-Switch GPIO\n");
+    }
+
+    system("echo -n 1e630000.spi > /sys/bus/platform/drivers/aspeed-smc/bind");
+  }
+
+  return ret;
+}
+
+int
+pal_fw_update_finished(uint8_t fru, const char *comp, int status) {
+  int ret = 0;
+  gpio_desc_t *desc;
+
+  if ((fru == FRU_MB) && !strcmp(comp, "bios")) {
+    system("echo -n 1e630000.spi > /sys/bus/platform/drivers/aspeed-smc/unbind");
+
+    desc = gpio_open_by_shadow("FM_BIOS_SPI_BMC_CTRL");
+    if (desc) {
+      gpio_set_value(desc, GPIO_VALUE_LOW);
+      gpio_set_direction(desc, GPIO_DIRECTION_IN);
+      gpio_close(desc);
+    }
+
+    ret = status;
+    if (status == 0) {
+      sleep(1);
+      pal_power_button_override();
+      sleep(10);
+      pal_set_server_power(FRU_MB, SERVER_POWER_ON);
+    }
+  }
+
+  return ret;
+}
+
+int
+pal_uart_select_led_set(void) {
+  static uint32_t pre_channel = 0xffffffff;
+  uint8_t vals;
+  uint32_t channel = 0;
+  const char *shadows[] = {
+    "FM_UARTSW_LSB_N",
+    "FM_UARTSW_MSB_N"
+  };
+
+  //UART Switch control by bmc
+  pal_uart_select(AST_GPIO_BASE, UARTSW_OFFSET, UARTSW_BY_BMC, 0);
+
+  if (get_gpio_shadow_array(shadows, ARRAY_SIZE(shadows), &vals)) {
+    return -1;
+  }
+  // The GPIOs are active-low. So, invert it.
+  channel = (uint32_t)(~vals & 0x3);
+  // Shift to get to the bit position of the led.
+  channel = channel << 24;
+
+  // If the requested channel is the same as the previous, do nothing.
+  if (channel == pre_channel) {
+     return -1;
+  }
+  pre_channel = channel;
+ 
+  //show channel on 7-segment display
+  pal_uart_select(AST_GPIO_BASE, SEVEN_SEGMENT_OFFSET, SET_SEVEN_SEGMENT, channel); 
+  return 0;
 }
