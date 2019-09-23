@@ -1,4 +1,6 @@
-# Copyright 2014-present Facebook. All Rights Reserved.
+#!/usr/bin/env python
+#
+# Copyright 2019-present Facebook. All Rights Reserved.
 #
 # This program file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -14,8 +16,13 @@
 # Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
-FILESEXTRAPATHS_prepend := "${THISDIR}/files/:"
-SRC_URI  += " file://setup-bic-cached.sh \
-              file://bic-cached.c \
-            "
-CFLAGS_prepend = " -DCONFIG_FBY3_POC "
+#
+import unittest
+
+from common.base_gpio_test import BaseGpioTest
+from tests.wedge400.test_data.gpio.gpio import GPIOS
+
+
+class GpioTest(BaseGpioTest, unittest.TestCase):
+    def set_gpios(self):
+        self.gpios = GPIOS
