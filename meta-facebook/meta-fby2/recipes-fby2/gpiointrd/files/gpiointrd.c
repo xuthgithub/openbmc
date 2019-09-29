@@ -500,7 +500,7 @@ static void gpio_event_handle(gpio_poll_st *gp)
     else { // high to low
       syslog(LOG_CRIT, "DEASSERT: SLED is seated");
       memset(cmd, 0, sizeof(cmd));
-      sprintf(cmd, "/etc/init.d/setup-fan.sh ; sv start fscd");
+      sprintf(cmd, "sv start fscd");
       system(cmd);
     }
   }
@@ -564,11 +564,7 @@ static void gpio_event_handle(gpio_poll_st *gp)
        return;
     }
 
-    sprintf(vpath, GPIO_VAL, GPIO_FAN_LATCH_DETECT);
-    read_device(vpath, &value);
-
-    // HOT SERVER event would be detected when SLED is pulled out
-    if (value) {
+    // HOT SERVER event would be detected
        prsnt_assert[slot_id] = true;
 
        if (gp->value == 1) { // SLOT Removal
@@ -613,6 +609,7 @@ static void gpio_event_handle(gpio_poll_st *gp)
             pthread_cancel(hsvc_action_tid[slot_id]);
           }
 
+          pal_set_dev_config_setup(0); // set up device fan config
           //Create thread for hsvc event detect
           if (pthread_create(&hsvc_action_tid[slot_id], NULL, hsvc_event_handler, &hsvc_info[slot_id]) < 0) {
             syslog(LOG_WARNING, "[%s] Create hsvc_event_handler thread failed for slot%x\n",__func__, slot_id);
@@ -622,7 +619,6 @@ static void gpio_event_handle(gpio_poll_st *gp)
           IsHotServiceStart[slot_id] = true;
           pthread_mutex_unlock(&hsvc_mutex[slot_id]);
        }
-    }
   } // End of GPIO_SLOT1/2/3/4_PRSNT_B_N, GPIO_SLOT1/2/3/4_PRSNT_N
   else if (gp->gs.gs_gpio == gpio_num("GPIOO3") || gp->gs.gs_gpio == gpio_num("GPIOG7")) {
     if (pal_get_hand_sw(&slot_id)) {
